@@ -92,7 +92,8 @@ def make_topic_word_model(key,
                           num_encoders=2,
                           num_decoders=2,
                           qkv_dim=128,
-                          embedding_dim=128):
+                          embedding_dim=128,
+                          test_percent=0.2):
   key, subkey = jax.random.split(key)
   model = lda_models.LDATopicWordInferenceMachine.partial(
       num_topics=num_topics, vocab_size=vocab_size, num_heads=num_heads,
@@ -109,7 +110,7 @@ def make_topic_word_model(key,
         vocab_size, doc_length)
 
   def loss(params, key):
-    doc_words, log_topic_params, _ = sample_batch(key)
+    doc_words, _, log_topic_params, _ = sample_batch(key)
     losses = model.loss(params, subkey, doc_words, log_topic_params)
     return jnp.mean(losses)
 
@@ -121,17 +122,22 @@ def make_topic_word_model(key,
   
   batch_ais = vmap(dataset_ais, in_axes=(0, 0, 0, None, None, None))
 
+  batch_perplexity = vmap(lda.perplexity, in_axes=(0, 0, 0, None, None, None))
+
   def summarize(writer, step, params, key):
     k1, k2 = jax.random.split(key)
     # [batch_size, num_documents, doc_length]
-    docs_words, _ , _ = sample_batch(k1)
+    doc_words, doc_topics, true_log_topic_params, _ = sample_batch(k1)
     # [batch_size, num_topics, vocab_size]
-    log_topic_params = model.call(params, docs_words, None)
-    batch_log_ps = batch_ais(
-        jax.random.split(k2, num=batch_size), docs_words, log_topic_params, 
-        jnp.ones([num_topics]), 128, 64)
-    writer.scalar("doc_log_p", jnp.mean(batch_log_ps), step=step)
-    writer.scalar("word_log_p", jnp.mean(batch_log_ps) / doc_length, step=step)
+    pred_log_topic_params = model.call(params, doc_words, None)
+    pred_perplexity = batch_perplexity(
+            doc_words, doc_topics, pred_log_topic_params, doc_length, num_topics, test_percent)
+    true_perplexity = batch_perplexity(
+            doc_words, doc_topics, true_log_topic_params, doc_length, num_topics, test_percent)
+    writer.scalar("perplexity", jnp.mean(pred_perplexity), step=step)
+    writer.scalar("perplexity_true_params", jnp.mean(true_perplexity), step=step)
+    print("perplexity: %0.3f" % jnp.mean(pred_perplexity))
+    print("perplexity true params: %0.3f" % jnp.mean(true_perplexity))
 
   return params, loss, summarize
 

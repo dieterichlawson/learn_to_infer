@@ -25,6 +25,49 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
 
+def document_log_prob(
+        document_words, 
+        document_topics, 
+        log_topic_params, 
+        doc_length, 
+        num_topics, 
+        test_percent):
+  num_test_words = jax.lax.round(doc_length * test_percent)
+  test_mask = 1.*(jnp.arange(0, doc_length) < num_test_words)
+  topic_one_hot = jax.nn.one_hot(document_topics, num_topics)
+  topic_one_hot_train = topic_one_hot * (1-test_mask[:,jnp.newaxis])
+  topic_probs = jnp.sum(topic_one_hot_train, axis=0) / jnp.sum(topic_one_hot_train)
+  topic_log_probs = jnp.log(topic_probs)
+  # log p(w) = log \sum_topic p(word|topic)p(topic)
+  # Obtain matrix that is [num_topics, document_length] which is log prob(word | topic)
+  word_topic_log_probs = log_topic_params[:, document_words]
+  # add the log prob of each topic to each row in the matrix
+  word_topic_joint_log_probs = word_topic_log_probs + topic_log_probs[:, jnp.newaxis]
+  # log sum exp each column, giving the log prob of each word
+  word_log_probs = jscipy.special.logsumexp(word_topic_joint_log_probs, axis=0)
+  # mask that matrix so that all entries past the first test_percent are 0
+  word_log_probs *= test_mask
+  # sum the remaining vector, giving the sum of all log probs of words in the document
+  doc_log_prob = jnp.sum(word_log_probs)
+  return doc_log_prob
+
+@partial(jit, static_argnums=(3,4,5))
+def perplexity(
+        documents_words, 
+        documents_topics, 
+        log_topic_params, 
+        doc_length,
+        num_topics, 
+        test_percent):
+  document_log_probs = vmap(document_log_prob,
+                            in_axes=(0, 0, None, None, None, None))(
+                                documents_words, documents_topics,
+                                log_topic_params, doc_length, num_topics,
+                                test_percent)
+  perplexity = jnp.exp(- jnp.sum(document_log_probs) /
+                       (documents_words.shape[0] * doc_length))
+  return perplexity
+
 def sample_log_dirichlet(key, alpha, shape=()):
   gamma_shape = tuple(list(shape) + [alpha.shape[0]])
   gammas = jax.random.gamma(key, alpha, shape=gamma_shape)
@@ -89,7 +132,7 @@ def sample_docs(key, log_topic_params, log_doc_params, doc_length):
   sample_doc = lambda a: jax.random.categorical(a[1], log_topic_params[a[0]])
   keys = jax.random.split(k2, num=num_documents)
   doc_words = jax.lax.map(sample_doc, (doc_topics, keys))
-  return doc_words
+  return doc_words, doc_topics
 
 
 @partial(jit, static_argnums=(1, 2, 3, 4))
@@ -116,8 +159,8 @@ def sample_lda(key, num_docs, num_topics, vocab_size, doc_length):
   key1, key2 = jax.random.split(key)
   log_topic_params, log_doc_params = sample_params(
       key1, num_docs, jnp.ones([num_topics]), jnp.ones([vocab_size]))
-  doc_words = sample_docs(key2, log_topic_params, log_doc_params, doc_length)
-  return doc_words, log_topic_params, log_doc_params
+  doc_words, doc_topics = sample_docs(key2, log_topic_params, log_doc_params, doc_length)
+  return doc_words, doc_topics, log_topic_params, log_doc_params
 
 def gibbs_word_topic_conditional(
     index,
