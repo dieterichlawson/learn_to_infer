@@ -69,7 +69,7 @@ class LDATopicWordInferenceMachine(nn.Module):
 
   def apply(self,
             documents,
-            topic_params,
+            log_topic_params,
             num_topics=50,
             vocab_size=30000,
             num_heads=8,
@@ -93,7 +93,7 @@ class LDATopicWordInferenceMachine(nn.Module):
         doc_embeddings,
         jnp.full([batch_size], num_documents),
         jnp.full([batch_size], num_topics),
-        targets=topic_params,
+        targets=log_topic_params,
         target_dim=vocab_size,
         max_input_length=num_documents,
         max_target_length=num_topics,
@@ -105,95 +105,95 @@ class LDATopicWordInferenceMachine(nn.Module):
 
     # softmax the last dimension of the topic params to make each vector sum
     # to one.
-    out_topic_params = jax.nn.softmax(out_raw_topic_params, axis=-1)
+    out_log_topic_params = jax.nn.log_softmax(out_raw_topic_params, axis=-1)
 
-    return out_topic_params
+    return out_log_topic_params
 
   @classmethod
-  def loss(cls, params, key, documents, topic_params):
-    batch_size, num_topics, _ = topic_params.shape
-    pred_topic_params = cls.call(
-        params, documents, topic_params=topic_params)
+  def loss(cls, params, key, documents, log_topic_params):
+    batch_size, num_topics, _ = log_topic_params.shape
+    pred_log_topic_params = cls.call(
+        params, documents, log_topic_params=log_topic_params)
 
     wasserstein_dist, _ = jax.vmap(
         util.atomic_sinkhorn, in_axes=(0, None, 0, None, 0))(
-            topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
-            pred_topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
+            log_topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
+            pred_log_topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
             jax.random.split(key, num=batch_size))
 
     return wasserstein_dist
 
-
-class LDADocTopicInferenceMachine(nn.Module):
-
-  def apply(self,
-            documents,
-            topic_params,
-            doc_topic_proportions,
-            num_topics=50,
-            vocab_size=30000,
-            num_heads=8,
-            num_encoders=6,
-            num_decoders=6,
-            qkv_dim=512,
-            embedding_dim=512,
-            activation_fn=flax.nn.relu,
-            weight_init=jax.nn.initializers.xavier_uniform(),
-            embedding_init=jax.nn.initializers.normal(stddev=1.0)):
-    """
-    Args:
-      documents: [batch_size, doc_length] integer Tensor.
-      topic_params: [batch_size, num_topics, vocab_size] float Tensor.
-      doc_topic_proportions: [batch_size, num_topics] float Tensor.
-    """
-
-    batch_size, doc_length = documents.shape
-
-    embedding = Embedding.shared(
-        num_embeddings=vocab_size, embedding_dim=embedding_dim,
-        weight_init=embedding_init, name="word_embedding")
-
-    # [batch_size, doc_length, embedding_dim]
-    doc_word_embeddings = embedding(documents)
-
-    # embedded_topics will be [batch_size, num_topics, embedding_dim]
-    embedded_topics = flax.nn.Dense(
-        topic_params,
-        features=embedding_dim,
-        kernel_init=weight_init)
-
-    # concatenate the document and topic embeddings to produce
-    # [batch_size, document_length + num_topics, embedding_dim]
-    doc_topic_input = jnp.concatenate(
-        [doc_word_embeddings, embedded_topics], axis=1)
-
-    # feed the doc_topic_input into a transformer to produce the
-    # [batch_size, num_topics, 1] document-topic proportions.
-    out_doc_topics = transformer.EncoderDecoderTransformer(
-        doc_topic_input,
-        jnp.full([batch_size], doc_length + num_topics),
-        jnp.full([batch_size], num_topics),
-        targets=doc_topic_proportions[Ellipsis, jnp.newaxis],
-        target_dim=1,
-        max_input_length=doc_length + num_topics,
-        max_target_length=num_topics,
-        num_heads=num_heads,
-        num_encoders=num_encoders,
-        qkv_dim=qkv_dim,
-        activation_fn=activation_fn,
-        weight_init=weight_init)
-
-    return jnp.squeeze(out_doc_topics, axis=2)
-
-  @classmethod
-  def loss(cls, params, key, documents, topic_params, doc_topic_proportions):
-    pred_doc_topic_proportions = cls.call(
-        params, documents, topic_params=topic_params,
-        doc_topic_proportions=doc_topic_proportions)
-
-    pred_doc_topic_logprobs = jax.nn.log_softmax(pred_doc_topic_proportions,
-                                                 axis=-1)
-    doc_topic_loss = util.categorical_kl(doc_topic_proportions,
-                                         pred_doc_topic_logprobs)
-    return doc_topic_loss
-
+#
+#class LDADocTopicInferenceMachine(nn.Module):
+#
+#  def apply(self,
+#            documents,
+#            topic_params,
+#            doc_topic_proportions,
+#            num_topics=50,
+#            vocab_size=30000,
+#            num_heads=8,
+#            num_encoders=6,
+#            num_decoders=6,
+#            qkv_dim=512,
+#            embedding_dim=512,
+#            activation_fn=flax.nn.relu,
+#            weight_init=jax.nn.initializers.xavier_uniform(),
+#            embedding_init=jax.nn.initializers.normal(stddev=1.0)):
+#    """
+#    Args:
+#      documents: [batch_size, doc_length] integer Tensor.
+#      topic_params: [batch_size, num_topics, vocab_size] float Tensor.
+#      doc_topic_proportions: [batch_size, num_topics] float Tensor.
+#    """
+#
+#    batch_size, doc_length = documents.shape
+#
+#    embedding = Embedding.shared(
+#        num_embeddings=vocab_size, embedding_dim=embedding_dim,
+#        weight_init=embedding_init, name="word_embedding")
+#
+#    # [batch_size, doc_length, embedding_dim]
+#    doc_word_embeddings = embedding(documents)
+#
+#    # embedded_topics will be [batch_size, num_topics, embedding_dim]
+#    embedded_topics = flax.nn.Dense(
+#        topic_params,
+#        features=embedding_dim,
+#        kernel_init=weight_init)
+#
+#    # concatenate the document and topic embeddings to produce
+#    # [batch_size, document_length + num_topics, embedding_dim]
+#    doc_topic_input = jnp.concatenate(
+#        [doc_word_embeddings, embedded_topics], axis=1)
+#
+#    # feed the doc_topic_input into a transformer to produce the
+#    # [batch_size, num_topics, 1] document-topic proportions.
+#    out_doc_topics = transformer.EncoderDecoderTransformer(
+#        doc_topic_input,
+#        jnp.full([batch_size], doc_length + num_topics),
+#        jnp.full([batch_size], num_topics),
+#        targets=doc_topic_proportions[Ellipsis, jnp.newaxis],
+#        target_dim=1,
+#        max_input_length=doc_length + num_topics,
+#        max_target_length=num_topics,
+#        num_heads=num_heads,
+#        num_encoders=num_encoders,
+#        qkv_dim=qkv_dim,
+#        activation_fn=activation_fn,
+#        weight_init=weight_init)
+#
+#    return jnp.squeeze(out_doc_topics, axis=2)
+#
+#  @classmethod
+#  def loss(cls, params, key, documents, topic_params, doc_topic_proportions):
+#    pred_doc_topic_proportions = cls.call(
+#        params, documents, topic_params=topic_params,
+#        doc_topic_proportions=doc_topic_proportions)
+#
+#    pred_doc_topic_logprobs = jax.nn.log_softmax(pred_doc_topic_proportions,
+#                                                 axis=-1)
+#    doc_topic_loss = util.categorical_kl(doc_topic_proportions,
+#                                         pred_doc_topic_logprobs)
+#    return doc_topic_loss
+#

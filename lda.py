@@ -25,6 +25,13 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
 
+def sample_log_dirichlet(key, alpha, shape=()):
+  gamma_shape = tuple(list(shape) + [alpha.shape[0]])
+  gammas = jax.random.gamma(key, alpha, shape=gamma_shape)
+  log_gammas = jnp.log(gammas)
+  log_probs = jax.nn.log_softmax(log_gammas, axis=-1)
+  return log_probs
+
 @partial(jit, static_argnums=(1,))
 def sample_params(key, num_docs, doc_topic_alpha, topic_word_alpha):
   """Samples the parameters for LDA, the topic/word dists and doc/topic dists.
@@ -39,9 +46,9 @@ def sample_params(key, num_docs, doc_topic_alpha, topic_word_alpha):
       topic-word categorical distributions. Should be a vector of shape
         [vocab_size].
   Returns:
-    topic_params: A [num_topics, vocab_size] matrix containing parameters
+    log_topic_params: A [num_topics, vocab_size] matrix containing parameters
       for each topic's categorical distribution over words.
-    doc_params: A [num_docs, num_topics] matrix containing parameters for
+    log_doc_params: A [num_docs, num_topics] matrix containing parameters for
       each document's categorical distribution over topics.
   """
   # Each topic is a multinomial distribution over words.
@@ -49,40 +56,37 @@ def sample_params(key, num_docs, doc_topic_alpha, topic_word_alpha):
   # num_topics different multinomial distributions over the vocabulary.
   num_topics = doc_topic_alpha.shape[0]
   k1, k2 = jax.random.split(key)
-  topic_params = jax.random.dirichlet(k1, alpha=topic_word_alpha,
-                                      shape=[num_topics])
+  log_topic_params = sample_log_dirichlet(k1, topic_word_alpha, shape=[num_topics])
   # Each document is a multinomial distribution over topics.
   # The document matrix is a [num_documents, num_topics] set of parameters for
   # num_documents different multinomial distributions over the set of topics.
-  doc_params = jax.random.dirichlet(k2, alpha=doc_topic_alpha,
-                                    shape=[num_docs])
-  return topic_params, doc_params
+  log_doc_params = sample_log_dirichlet(k2, doc_topic_alpha, shape=[num_docs])
+  return log_topic_params, log_doc_params
 
 
 @partial(jit, static_argnums=3)
-def sample_docs(key, topic_params, doc_params, doc_length):
+def sample_docs(key, log_topic_params, log_doc_params, doc_length):
   """Samples documents given parameters.
 
   Args:
     key: A JAX PRNG key.
-    topic_params: A [num_topics, vocab_size] matrix containing parameters
+    log_topic_params: A [num_topics, vocab_size] matrix containing parameters
       for each topic's categorical distribution over words.
-    doc_params: A [num_docs, num_topics] matrix containing parameters for
+    log_doc_params: A [num_docs, num_topics] matrix containing parameters for
       each document's categorical distribution over topics.
     doc_length: The length of each document, a python int.
   Returns:
     doc_words: A [num_documents, doc_length] matrix containing the indices of
       each word in each document. Each index will be in [0, vocab_size).
   """
-  num_documents, _ = doc_params.shape
+  num_documents, _ = log_doc_params.shape
   k1, k2 = jax.random.split(key)
   # Sample the sequence of topics for each document, a
   # [num_documents, doc_length] matrix of topic indices.
-  doc_topics = jax.random.categorical(k1, doc_params,
-                                      shape=(doc_length, num_documents)).T
+  doc_topics = jax.random.categorical(k1, log_doc_params, shape=(doc_length, num_documents)).T
   # Sample the sequence of words for each document, a
   # [doc_length, num_documents] matrix of word indices.
-  sample_doc = lambda a: jax.random.categorical(a[1], topic_params[a[0]])
+  sample_doc = lambda a: jax.random.categorical(a[1], log_topic_params[a[0]])
   keys = jax.random.split(k2, num=num_documents)
   doc_words = jax.lax.map(sample_doc, (doc_topics, keys))
   return doc_words
@@ -104,24 +108,22 @@ def sample_lda(key, num_docs, num_topics, vocab_size, doc_length):
   Returns:
     doc_words: A [num_documents, doc_length] matrix containing the indices of
       each word in each document. Each index will be in [0, vocab_size).
-    topic_params: A [num_topics, vocab_size] matrix containing parameters
+    log_topic_params: A [num_topics, vocab_size] matrix containing parameters
       for each topic's categorical distribution over words.
-    doc_params: A [num_docs, num_topics] matrix containing parameters for
+    log_doc_params: A [num_docs, num_topics] matrix containing parameters for
       each document's categorical distribution over topics.
   """
   key1, key2 = jax.random.split(key)
-  topic_params, doc_params = sample_params(
-      key1, num_docs,
-      jnp.full([num_topics], 1. / num_topics),
-      jnp.full([vocab_size], 1. / vocab_size))
-  doc_words = sample_docs(key2, topic_params, doc_params, doc_length)
-  return doc_words, topic_params, doc_params
+  log_topic_params, log_doc_params = sample_params(
+      key1, num_docs, jnp.ones([num_topics]), jnp.ones([vocab_size]))
+  doc_words = sample_docs(key2, log_topic_params, log_doc_params, doc_length)
+  return doc_words, log_topic_params, log_doc_params
 
 def gibbs_word_topic_conditional(
     index,
     doc_words,
     doc_topics,
-    topic_params,
+    log_topic_params,
     doc_topic_alpha,
     temperature):
   """Compute the distribution over a specific topic given other topics and all words.
@@ -131,7 +133,7 @@ def gibbs_word_topic_conditional(
     doc_words: An integer vector of shape [doc_length], the set of words in the document.
     doc_topics: An integer vector of shape [doc_length], the set of topics associated with
       each word in the document. The topic at 'index' is not used.
-    topic_params: A [num_topics, vocab_size] matrix representing the parameters of each topic.
+    log_topic_params: A [num_topics, vocab_size] matrix representing the parameters of each topic.
     doc_topic_alpha: The concentration parameter for the Dirichlet prior over the document
       topic distributions. Must be a vector of shape [num_topics].
   
@@ -142,17 +144,17 @@ def gibbs_word_topic_conditional(
   """
   num_topics = doc_topic_alpha.shape[0]
   num_words = doc_words.shape[0]
-  p_word = topic_params[:, doc_words[index]]
+  log_p_word = log_topic_params[:, doc_words[index]]
   topic_counts = jnp.sum(
       jax.nn.one_hot(doc_topics, num_classes=num_topics), axis=0)
   topic_counts = topic_counts - jax.nn.one_hot(doc_topics[index],
                                                num_classes=num_topics)
   p_topic = (topic_counts + doc_topic_alpha)/(
       num_words - 1 + jnp.sum(doc_topic_alpha))
-  log_probs = temperature * jnp.log(p_word) + jnp.log(p_topic)
+  log_probs = temperature * log_p_word + jnp.log(p_topic)
   return log_probs
 
-def gibbs_pass(key, doc_words, doc_topics, topic_params, doc_topic_alpha, temperature):
+def gibbs_pass(key, doc_words, doc_topics, log_topic_params, doc_topic_alpha, temperature):
   """Runs one pass of Gibbs sampling.
 
   Runs one full pass of Gibbs sampling on the topics of a document, sampling each topic
@@ -163,7 +165,7 @@ def gibbs_pass(key, doc_words, doc_topics, topic_params, doc_topic_alpha, temper
     doc_words: An integer vector of shape [doc_length], the words in the document.
     doc_topics: An integer vector of shape [doc_length], the topics associated with each word
       in the document.
-    topic_params: A [num_topics, vocab_size] matrix representing each topics distribution over
+    log_topic_params: A [num_topics, vocab_size] matrix representing each topics distribution over
       words.
     doc_topic_alpha: The concentration parameter for the dirichlet prior on the document-topic
       distribution.
@@ -176,7 +178,7 @@ def gibbs_pass(key, doc_words, doc_topics, topic_params, doc_topic_alpha, temper
   def gibbs_step(i, carry):
     key, doc_topics = carry
     log_p_topics = gibbs_word_topic_conditional(
-        i, doc_words, doc_topics, topic_params, doc_topic_alpha, temperature)
+        i, doc_words, doc_topics, log_topic_params, doc_topic_alpha, temperature)
     key, new_key = jax.random.split(key)
     topic = tfd.Categorical(logits=log_p_topics).sample(seed=key)
     new_doc_topics = jax.ops.index_update(doc_topics, i, topic)
@@ -186,13 +188,13 @@ def gibbs_pass(key, doc_words, doc_topics, topic_params, doc_topic_alpha, temper
       0, doc_topics.shape[0], gibbs_step, (key, doc_topics))
   return doc_topics
 
-def lda_ais(key, doc_words, topic_params, doc_topic_alpha, num_dists, num_samples):
+def lda_ais(key, doc_words, log_topic_params, doc_topic_alpha, num_dists, num_samples):
   """Computes an AIS estimate of the log marginal probability of a document.
 
   Args:
     key: A JAX PRNG key.
     doc_words: An integer vector of shape [doc_length], the words in the document.
-    topic_params: A [num_topics, vocab_size] matrix representing each topics distribution over
+    log_topic_params: A [num_topics, vocab_size] matrix representing each topics distribution over
       words.
     doc_topic_alpha: The concentration parameter for the dirichlet prior on the document-topic
       distribution.
@@ -215,7 +217,7 @@ def lda_ais(key, doc_words, topic_params, doc_topic_alpha, num_dists, num_sample
     key, doc_topics = carry
     new_key, key = jax.random.split(key)
     new_doc_topics = gibbs_pass(
-        key, doc_words, doc_topics, topic_params, doc_topic_alpha, temps[i])
+        key, doc_words, doc_topics, log_topic_params, doc_topic_alpha, temps[i])
     return (new_key, new_doc_topics), new_doc_topics
 
   def sample_chain(key, init_doc_topics):
@@ -229,12 +231,12 @@ def lda_ais(key, doc_words, topic_params, doc_topic_alpha, num_dists, num_sample
   topic_chains = vmap(sample_chain)(
       jax.random.split(key, num=num_samples), init_doc_topics)
   # [num_topics, doc_length]
-  word_topic_probs = topic_params[:, doc_words]
+  word_topic_log_probs = log_topic_params[:, doc_words]
   # [num_samples, num_dists - 1, doc_length]
-  probs = vmap(lambda t, w: w[t], in_axes=(2,1), out_axes=2)(
-      topic_chains, word_topic_probs)
+  log_probs = vmap(lambda t, w: w[t], in_axes=(2,1), out_axes=2)(
+      topic_chains, word_topic_log_probs)
   # [num_samples, num_dists - 1]
-  doc_log_probs = jnp.sum(jnp.log(probs), axis=2)
+  doc_log_probs = jnp.sum(log_probs, axis=2)
   # [num_dists - 1]
   temp_deltas = jnp.diff(temps)
   # [num_samples]

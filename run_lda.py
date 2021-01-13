@@ -33,7 +33,7 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
 
-flags.DEFINE_enum("model", "topic_word", ["topic_word", "doc_topic"],
+flags.DEFINE_enum("model", "topic_word", ["topic_word"],
                   "The model to run, either training topic_word model or "
                   "doc_topic model.")
 flags.DEFINE_integer("num_encoders", 6,
@@ -109,14 +109,14 @@ def make_topic_word_model(key,
         vocab_size, doc_length)
 
   def loss(params, key):
-    doc_words, topic_params, _ = sample_batch(key)
-    losses = model.loss(params, subkey, doc_words, topic_params)
+    doc_words, log_topic_params, _ = sample_batch(key)
+    losses = model.loss(params, subkey, doc_words, log_topic_params)
     return jnp.mean(losses)
 
-  def dataset_ais(key, docs_words, topic_params, doc_topic_alpha, num_dists, num_samples):
+  def dataset_ais(key, docs_words, log_topic_params, doc_topic_alpha, num_dists, num_samples):
     docs_log_ps = vmap(lda.lda_ais, in_axes=(0, 0, None, None, None, None))(
-        jax.random.split(key, num=num_docs), docs_words, topic_params, doc_topic_alpha, num_dists,
-        num_samples)
+        jax.random.split(key, num=num_docs), docs_words, log_topic_params, doc_topic_alpha, 
+        num_dists, num_samples)
     return jnp.mean(docs_log_ps)
   
   batch_ais = vmap(dataset_ais, in_axes=(0, 0, 0, None, None, None))
@@ -126,10 +126,10 @@ def make_topic_word_model(key,
     # [batch_size, num_documents, doc_length]
     docs_words, _ , _ = sample_batch(k1)
     # [batch_size, num_topics, vocab_size]
-    topic_params = model.call(params, docs_words, None)
+    log_topic_params = model.call(params, docs_words, None)
     batch_log_ps = batch_ais(
-        jax.random.split(k2, num=batch_size), docs_words, topic_params, 
-        jnp.full([num_topics], 1./num_topics), 128, 64)
+        jax.random.split(k2, num=batch_size), docs_words, log_topic_params, 
+        jnp.ones([num_topics]), 128, 64)
     writer.scalar("doc_log_p", jnp.mean(batch_log_ps), step=step)
     writer.scalar("word_log_p", jnp.mean(batch_log_ps) / doc_length, step=step)
 
