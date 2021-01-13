@@ -20,7 +20,7 @@ import sys
 import timeit
 import traceback
 
-from . import util
+import util
 
 from flax import jax_utils
 from flax import optim

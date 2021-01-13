@@ -17,9 +17,9 @@
 """
 import os
 
-from . import lda
-from . import lda_models
-from . import train
+import lda
+import lda_models
+import train
 
 from absl import app
 from absl import flags
@@ -28,6 +28,9 @@ from jax import vmap
 from jax.config import config
 import jax.experimental.optimizers
 import jax.numpy as jnp
+
+from tensorflow_probability.substrates import jax as tfp
+tfd = tfp.distributions
 
 
 flags.DEFINE_enum("model", "topic_word", ["topic_word", "doc_topic"],
@@ -110,43 +113,27 @@ def make_topic_word_model(key,
     losses = model.loss(params, subkey, doc_words, topic_params)
     return jnp.mean(losses)
 
-  return params, loss
+  def dataset_ais(key, docs_words, topic_params, doc_topic_alpha, num_dists, num_samples):
+    docs_log_ps = vmap(lda.lda_ais, in_axes=(0, 0, None, None, None, None))(
+        jax.random.split(key, num=num_docs), docs_words, topic_params, doc_topic_alpha, num_dists,
+        num_samples)
+    return jnp.mean(docs_log_ps)
+  
+  batch_ais = vmap(dataset_ais, in_axes=(0, 0, 0, None, None, None))
 
+  def summarize(writer, step, params, key):
+    k1, k2 = jax.random.split(key)
+    # [batch_size, num_documents, doc_length]
+    docs_words, _ , _ = sample_batch(k1)
+    # [batch_size, num_topics, vocab_size]
+    topic_params = model.call(params, docs_words, None)
+    batch_log_ps = batch_ais(
+        jax.random.split(k2, num=batch_size), docs_words, topic_params, 
+        jnp.full([num_topics], 1./num_topics), 128, 64)
+    writer.scalar("doc_log_p", jnp.mean(batch_log_ps), step=step)
+    writer.scalar("word_log_p", jnp.mean(batch_log_ps) / doc_length, step=step)
 
-def make_doc_topic_model(key,
-                         batch_size=64,
-                         doc_length=50,
-                         num_topics=10,
-                         vocab_size=1000,
-                         num_heads=4,
-                         num_encoders=2,
-                         num_decoders=2,
-                         qkv_dim=128,
-                         embedding_dim=128):
-  key, subkey = jax.random.split(key)
-  model = lda_models.LDADocTopicInferenceMachine.partial(
-      num_topics=num_topics, vocab_size=vocab_size, num_heads=num_heads,
-      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=qkv_dim,
-      embedding_dim=embedding_dim)
-
-  _, params = model.init_by_shape(
-      subkey, [((batch_size, doc_length), jnp.int32),
-               ((batch_size, num_topics, vocab_size), jnp.float32),
-               ((batch_size, num_topics), jnp.float32)])
-
-  def sample_batch(key):
-    doc_words, topic_params, doc_params = vmap(
-        lda.sample_lda, in_axes=(0, None, None, None, None))(
-            jax.random.split(key, num=batch_size), 1,
-            num_topics, vocab_size, doc_length)
-    return jnp.squeeze(doc_words, 1), topic_params, jnp.squeeze(doc_params, 1)
-
-  def loss(params, key):
-    doc_words, topic_params, doc_params = sample_batch(key)
-    losses = model.loss(params, subkey, doc_words, topic_params, doc_params)
-    return jnp.mean(losses)
-
-  return params, loss
+  return params, loss, summarize
 
 
 def make_logdir(config):
@@ -169,40 +156,28 @@ def main(unused_argv):
     ) == 0, "Device count must evenly divide batch_size"
     FLAGS.batch_size = int(FLAGS.batch_size / jax.local_device_count())
 
-  if FLAGS.model == "topic_word":
-    init_params, loss_fn = make_topic_word_model(
-        k1,
-        batch_size=FLAGS.batch_size,
-        num_docs=FLAGS.num_docs,
-        doc_length=FLAGS.doc_length,
-        num_topics=FLAGS.num_topics,
-        vocab_size=FLAGS.vocab_size,
-        num_heads=FLAGS.num_heads,
-        num_encoders=FLAGS.num_encoders,
-        num_decoders=FLAGS.num_decoders,
-        qkv_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
-        embedding_dim=FLAGS.embedding_dim)
-  elif FLAGS.model == "doc_topic":
-    init_params, loss_fn = make_doc_topic_model(
-        k1,
-        batch_size=FLAGS.batch_size,
-        doc_length=FLAGS.doc_length,
-        num_topics=FLAGS.num_topics,
-        vocab_size=FLAGS.vocab_size,
-        num_heads=FLAGS.num_heads,
-        num_encoders=FLAGS.num_encoders,
-        num_decoders=FLAGS.num_decoders,
-        qkv_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
-        embedding_dim=FLAGS.embedding_dim)
+  init_params, loss_fn, summarize_fn = make_topic_word_model(
+          k1,
+          batch_size=FLAGS.batch_size,
+          num_docs=FLAGS.num_docs,
+          doc_length=FLAGS.doc_length,
+          num_topics=FLAGS.num_topics,
+          vocab_size=FLAGS.vocab_size,
+          num_heads=FLAGS.num_heads,
+          num_encoders=FLAGS.num_encoders,
+          num_decoders=FLAGS.num_decoders,
+          qkv_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
+          embedding_dim=FLAGS.embedding_dim)
   train.train_loop(
-      k2, init_params, loss_fn,
-      parallel=FLAGS.parallel,
-      lr=FLAGS.lr,
-      num_steps=FLAGS.num_steps,
-      summarize_every=FLAGS.summarize_every,
-      checkpoint_every=FLAGS.checkpoint_every,
-      clobber_checkpoint=FLAGS.clobber_checkpoint,
-      logdir=make_logdir(FLAGS))
+          k2, init_params, loss_fn,
+          parallel=FLAGS.parallel,
+          lr=FLAGS.lr,
+          num_steps=FLAGS.num_steps,
+          summarize_fn=summarize_fn,
+          summarize_every=FLAGS.summarize_every,
+          checkpoint_every=FLAGS.checkpoint_every,
+          clobber_checkpoint=FLAGS.clobber_checkpoint,
+          logdir=make_logdir(FLAGS))
 
 
 if __name__ == "__main__":

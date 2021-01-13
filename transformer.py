@@ -17,7 +17,7 @@
 """
 from functools import partial
 
-from . import util
+import util
 
 import flax
 from flax import nn

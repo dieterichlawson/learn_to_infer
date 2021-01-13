@@ -17,8 +17,8 @@
 """
 from functools import partial
 
-from . import transformer
-from . import util
+import transformer
+import util
 
 import flax
 from flax import nn
@@ -26,6 +26,8 @@ import jax
 import jax.numpy as jnp
 import jax.random
 
+from tensorflow_probability.substrates import jax as tfp
+tfd = tfp.distributions
 
 class Embedding(nn.Module):
 
