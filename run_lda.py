@@ -29,6 +29,10 @@ from jax.config import config
 import jax.experimental.optimizers
 import jax.numpy as jnp
 
+import sklearn
+from sklearn import decomposition
+sklearn_lda = decomposition.LatentDirichletAllocation
+
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
@@ -124,6 +128,17 @@ def make_topic_word_model(key,
 
   batch_perplexity = vmap(lda.topic_param_perplexity, in_axes=(0, 0, None, None))
 
+  def fit_sklearn_lda(docs_words, num_topics, vocab_size):
+    # [batch_size, num_docs, doc_length, vocab_size] -> [batch_size, num_docs, vocab_size]
+    docs_word_counts = jnp.sum(jax.nn.one_hot(docs_words, num_classes=vocab_size), axis=2)
+    out_params = []
+    for i in range(batch_size):
+      out = sklearn_lda(n_components=num_topics).fit(docs_word_counts[i])
+      topic_logits = jnp.log(out.components_)
+      normalized_log_topic_params = jax.nn.log_softmax(topic_logits, axis=1)
+      out_params.append(normalized_log_topic_params)
+    return jnp.array(out_params)
+
   def summarize(writer, step, params, key):
     em_tol = 1e-4
     k1, k2 = jax.random.split(key)
@@ -131,11 +146,17 @@ def make_topic_word_model(key,
     doc_words, doc_topics, true_log_topic_params, _ = sample_batch(k1)
     # [batch_size, num_topics, vocab_size]
     pred_log_topic_params = model.call(params, doc_words, None)
+    sklearn_log_topic_params = fit_sklearn_lda(doc_words, num_topics, vocab_size)
+
     pred_perplexity = batch_perplexity(doc_words, pred_log_topic_params, num_topics, em_tol)
+    sklearn_perplexity = batch_perplexity(doc_words, sklearn_log_topic_params, num_topics, em_tol)
     true_perplexity = batch_perplexity(doc_words, true_log_topic_params, num_topics, em_tol)
+
     writer.scalar("perplexity", jnp.mean(pred_perplexity), step=step)
+    writer.scalar("perplexity_sklearn", jnp.mean(sklearn_perplexity), step=step)
     writer.scalar("perplexity_true_params", jnp.mean(true_perplexity), step=step)
     print("perplexity: %0.3f" % jnp.mean(pred_perplexity))
+    print("sklearn perplexity: %0.3f" % jnp.mean(sklearn_perplexity))
     print("perplexity true params: %0.3f" % jnp.mean(true_perplexity))
 
   return params, loss, summarize
