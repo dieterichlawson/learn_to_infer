@@ -24,49 +24,61 @@ from functools import partial
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
+def doc_topic_em_inference(document_words, log_topic_params, num_topics, tol):
+  
+  # [num_topics, vocab_size]
+  topic_word_log_probs = log_topic_params[:, document_words]
 
-def document_log_prob(
-        document_words, 
-        document_topics, 
-        log_topic_params, 
-        doc_length, 
-        num_topics, 
-        test_percent):
-  num_test_words = jax.lax.round(doc_length * test_percent)
-  test_mask = 1.*(jnp.arange(0, doc_length) < num_test_words)
-  topic_one_hot = jax.nn.one_hot(document_topics, num_topics)
-  topic_one_hot_train = topic_one_hot * (1-test_mask[:,jnp.newaxis])
-  topic_probs = jnp.sum(topic_one_hot_train, axis=0) / jnp.sum(topic_one_hot_train)
-  topic_log_probs = jnp.log(topic_probs)
+  def em_step(carry):
+    # [num_topics, vocab_size]
+    prev_log_doc_topic_params, prev_likelihood, _, _ = carry
+    pseudo_obs = topic_word_log_probs + prev_log_doc_topic_params[:, jnp.newaxis]
+    pseudo_obs -= jscipy.special.logsumexp(pseudo_obs, axis=0, keepdims=True)
+    # [num_topics]
+    logits = jscipy.special.logsumexp(pseudo_obs, axis=1)
+    new_log_doc_topic_params = jax.nn.log_softmax(logits)
+    # Compute the objective
+    log_zs = jnp.exp(pseudo_obs)
+    new_likelihood = jnp.sum(log_zs*new_log_doc_topic_params[:, jnp.newaxis])
+    return (new_log_doc_topic_params, new_likelihood, 
+            prev_log_doc_topic_params, prev_likelihood)
+  
+  def em_stopping_cond(carry):
+    cur_params, cur_likelihood, prev_params, prev_likelihood = carry
+    return jnp.abs(cur_likelihood - prev_likelihood) >= tol
+
+  init_params = jnp.full([num_topics], -jnp.log(num_topics))
+  init_likelihood = -jnp.inf
+  outs = jax.lax.while_loop(em_stopping_cond, em_step, 
+                            (init_params, init_likelihood, 
+                             jnp.ones_like(init_params), 0.))
+  out_params, out_likelihood = outs[0:2]
+  return out_params
+
+def document_log_prob(document_words, document_log_topic_probs, log_topic_params):
   # log p(w) = log \sum_topic p(word|topic)p(topic)
   # Obtain matrix that is [num_topics, document_length] which is log prob(word | topic)
   word_topic_log_probs = log_topic_params[:, document_words]
   # add the log prob of each topic to each row in the matrix
-  word_topic_joint_log_probs = word_topic_log_probs + topic_log_probs[:, jnp.newaxis]
+  word_topic_joint_log_probs = word_topic_log_probs + document_log_topic_probs[:, jnp.newaxis]
   # log sum exp each column, giving the log prob of each word
   word_log_probs = jscipy.special.logsumexp(word_topic_joint_log_probs, axis=0)
-  # mask that matrix so that all entries past the first test_percent are 0
-  word_log_probs *= test_mask
   # sum the remaining vector, giving the sum of all log probs of words in the document
   doc_log_prob = jnp.sum(word_log_probs)
   return doc_log_prob
 
-@partial(jit, static_argnums=(3,4,5))
-def perplexity(
-        documents_words, 
-        documents_topics, 
-        log_topic_params, 
-        doc_length,
-        num_topics, 
-        test_percent):
-  document_log_probs = vmap(document_log_prob,
-                            in_axes=(0, 0, None, None, None, None))(
-                                documents_words, documents_topics,
-                                log_topic_params, doc_length, num_topics,
-                                test_percent)
-  perplexity = jnp.exp(- jnp.sum(document_log_probs) /
-                       (documents_words.shape[0] * doc_length))
+def perplexity(documents_words, documents_log_topic_probs, log_topic_params):
+  num_docs, doc_length = documents_words.shape
+  document_log_probs = vmap(document_log_prob, in_axes=(0, 0, None))(
+      documents_words, documents_log_topic_probs, log_topic_params)
+  perplexity = jnp.exp(- jnp.sum(document_log_probs) / (num_docs * doc_length))
   return perplexity
+
+@partial(jit, static_argnums=(2,3))
+def topic_param_perplexity(documents_words, log_topic_params, num_topics, em_tol):
+  docs_log_topic_probs = vmap(doc_topic_em_inference, in_axes=(0, None, None, None))(
+      documents_words, log_topic_params, num_topics, em_tol)
+  return perplexity(documents_words, docs_log_topic_probs, log_topic_params)
 
 def sample_log_dirichlet(key, alpha, shape=()):
   gamma_shape = tuple(list(shape) + [alpha.shape[0]])

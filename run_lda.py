@@ -122,18 +122,17 @@ def make_topic_word_model(key,
   
   batch_ais = vmap(dataset_ais, in_axes=(0, 0, 0, None, None, None))
 
-  batch_perplexity = vmap(lda.perplexity, in_axes=(0, 0, 0, None, None, None))
+  batch_perplexity = vmap(lda.topic_param_perplexity, in_axes=(0, 0, None, None))
 
   def summarize(writer, step, params, key):
+    em_tol = 1e-4
     k1, k2 = jax.random.split(key)
     # [batch_size, num_documents, doc_length]
     doc_words, doc_topics, true_log_topic_params, _ = sample_batch(k1)
     # [batch_size, num_topics, vocab_size]
     pred_log_topic_params = model.call(params, doc_words, None)
-    pred_perplexity = batch_perplexity(
-            doc_words, doc_topics, pred_log_topic_params, doc_length, num_topics, test_percent)
-    true_perplexity = batch_perplexity(
-            doc_words, doc_topics, true_log_topic_params, doc_length, num_topics, test_percent)
+    pred_perplexity = batch_perplexity(doc_words, pred_log_topic_params, num_topics, em_tol)
+    true_perplexity = batch_perplexity(doc_words, true_log_topic_params, num_topics, em_tol)
     writer.scalar("perplexity", jnp.mean(pred_perplexity), step=step)
     writer.scalar("perplexity_true_params", jnp.mean(true_perplexity), step=step)
     print("perplexity: %0.3f" % jnp.mean(pred_perplexity))
