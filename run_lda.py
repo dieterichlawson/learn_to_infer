@@ -133,7 +133,10 @@ def make_topic_word_model(key,
     docs_word_counts = jnp.sum(jax.nn.one_hot(docs_words, num_classes=vocab_size), axis=2)
     out_params = []
     for i in range(batch_size):
-      out = sklearn_lda(n_components=num_topics).fit(docs_word_counts[i])
+      out = sklearn_lda(
+              n_components=num_topics, 
+              doc_topic_prior=jnp.ones([num_topics]),
+              topic_word_prior=jnp.ones([num_topics])).fit(docs_word_counts[i])
       topic_logits = jnp.log(out.components_)
       normalized_log_topic_params = jax.nn.log_softmax(topic_logits, axis=1)
       out_params.append(normalized_log_topic_params)
