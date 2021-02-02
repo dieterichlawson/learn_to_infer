@@ -16,7 +16,7 @@
 """Functions for running EM on GMMs."""
 from functools import partial
 
-from . import util
+import util
 
 import jax
 from jax import jit

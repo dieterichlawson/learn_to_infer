@@ -18,7 +18,7 @@
 from functools import partial
 import io
 
-from . import ring_dist
+import ring_dist
 
 import jax
 from jax import vmap

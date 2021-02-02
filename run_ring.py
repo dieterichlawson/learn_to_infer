@@ -17,11 +17,11 @@
 """
 import os
 
-from . import metrics
-from . import plotting
-from . import ring_dist
-from . import ring_models
-from . import train
+import metrics
+import plotting
+import ring_dist
+import ring_models
+import train
 
 from absl import app
 from absl import flags

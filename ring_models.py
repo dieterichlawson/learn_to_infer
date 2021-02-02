@@ -17,9 +17,9 @@
 """
 from functools import partial
 
-from . import ring_dist
-from . import transformer
-from . import util
+import ring_dist
+import transformer
+import util
 
 import flax
 import jax

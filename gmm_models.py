@@ -17,8 +17,8 @@
 """
 from functools import partial
 
-from . import transformer
-from . import util
+import transformer
+import util
 
 import flax
 import jax

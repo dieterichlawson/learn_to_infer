@@ -17,10 +17,10 @@
 """
 import os
 
-from . import gmm_dist
-from . import gmm_models
-from . import metrics
-from . import util
+import gmm_dist
+import gmm_models
+import metrics
+import util
 
 from absl import app
 from absl import flags

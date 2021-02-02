@@ -17,11 +17,11 @@
 """
 import os
 
-from . import gmm_dist
-from . import gmm_models
-from . import metrics
-from . import plotting
-from . import train
+import gmm_dist
+import gmm_models
+import metrics
+import plotting
+import train
 
 from absl import app
 from absl import flags
