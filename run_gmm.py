@@ -302,6 +302,8 @@ def make_logdir(config):
 
 
 def main(unused_argv):
+  assert FLAGS.cov_dof >= FLAGS.data_dim + 2, "Wishart DOF must be >= 2 + data dim."
+
   if FLAGS.debug_nans:
     config.update("jax_debug_nans", True)
 

@@ -81,8 +81,8 @@ def sample_wishart(key, dof, scale):
   return jnp.einsum("ki,kj->ij", xs, xs)
 
 
-def sample_scaled_wishart(key, dof, scale):
-  """Samples from a scaled wishart distribution with E[W] = scale.
+def sample_scaled_inverse_wishart(key, dof, scale):
+  """Samples W from a scaled inverse wishart distribution with E[W^-1] = scale.
 
   Args:
     key: A JAX PRNG key.
@@ -91,10 +91,10 @@ def sample_scaled_wishart(key, dof, scale):
     scale: The expected value of the distribution, a PSD [d,d] matrix.
 
   Returns:
-    A sample from W(dof, (1/(dof-d-1))*scale)
+    A sample from IW(dof, (1/(dof-d-1))*scale)
   """
   data_dim = scale.shape[0]
-  return sample_wishart(key, dof, (1./(dof-data_dim-1))*scale)
+  return jnp.linalg.inv(sample_wishart(key, dof, (1./(dof-data_dim-1))*scale))
 
 
 def sample_gmm(key, mus, covs, w_logits, num_samples):
@@ -185,7 +185,7 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
       true mixture weights are in the first k entries.
   """
   key1, key2, key3 = jax.random.split(key, num=3)
-  covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
+  covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
       jax.random.split(key1, num=max_k), cov_dof, cov_shape)
   max_diag = jnp.amax(vmap(jnp.diag)(covs))
   mus = sample_spaced_means(key2, max_k, max_diag*separation_mult, data_dim)
@@ -228,7 +228,7 @@ def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape,
       true mixture weights are in the first k entries.
   """
   key1, key2 = jax.random.split(key)
-  covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
+  covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
       jax.random.split(key1, num=max_k), cov_dof, cov_shape)
   max_diag = jnp.amax(vmap(jnp.diag)(covs))
   mus = sample_spaced_means(key2, max_k, max_diag*separation_mult, data_dim)
