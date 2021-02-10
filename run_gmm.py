@@ -295,9 +295,10 @@ def make_summarize(
 def make_logdir(config):
   basedir = config.logdir
   exp_dir = (
-      "nheads_%d_nenc_%d_ndec_%d_sepm_%0.1f_data_dim_%d_mink_%d_maxk_%d"
+      "nheads_%d_nenc_%d_ndec_%d_sepm_%0.1f_data_dim_%d_mink_%d_maxk_%d_dps_per_k_%d"
       % (config.num_heads, config.num_encoders, config.num_decoders, 
-          config.separation_multiplier, config.data_dim, config.min_k, config.max_k))
+          config.separation_multiplier, config.data_dim, config.min_k, config.max_k,
+          config.data_points_per_mode))
   return os.path.join(basedir, exp_dir)
 
 
