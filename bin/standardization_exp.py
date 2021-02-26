@@ -17,7 +17,7 @@ job_args = {
   "data_dim": 2,
   "num_encoders": 2,
   "num_decoders": 2,
-  "num_heads": 8,
+  "num_heads": 16,
   "key_dim": 32,
   "value_dim_per_head": 32,
   "k": [2, 3, 4],
@@ -32,7 +32,7 @@ job_args = {
   "checkpoint_every": 2500,
   "summarize_every": 2500,
   "num_steps": int(1e8),
-  "logdir": "gs://l2i/data_dim_sweep"
+  "logdir": "gs://l2i/standardization_sweep"
 }
 
 commands = orch.make_commands(command, job_args)
