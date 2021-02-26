@@ -159,6 +159,60 @@ def unflatten_scale(flat_scale, original_dim):
   return out.at[jnp.diag_indices(original_dim)].set(exp_diag)
 
 
+def flatten_gmm_params(means, scales, log_weights):
+  """
+  means: A [max_k, data_dim] tensor containing the means.
+  scales: A [max_k, data_dim, data_dim] tensor containing the scale matrices
+  log_weights: A [max_k] tensor containing the weight of each component
+  """
+  flat_scales = vmap(flatten_scale)(scales)
+  flat_params = jnp.concatenate(
+        [log_weights[:, jnp.newaxis], means, flat_scales], axis=-1)
+  return flat_params
+
+
+def unflatten_gmm_params(flat_params, original_dim):
+  """
+  flat_params: A [max_k, 1 + data_dim + data_dim*(data_dim-1)/2] set of the flat parameters,
+    ordered as log_weights, means, flattened scales.
+  original_dim: The original dimension of the data.
+  """
+  log_weights = flat_params[:, 0]
+  mus = flat_params[:, 1:original_dim+1]
+  scales = vmap(unflatten_scale, in_axes=(0, None))(
+          flat_params[:, original_dim+1:], original_dim)
+  print("mus in unflat", mus)
+  print("scales in unflat", scales)
+  return mus, scales, log_weights
+
+def standardize_data(data, num_data_points, max_num_data_points):
+  """
+
+  Args:
+    data: A [max_num_data_points, data_dim] tensor.
+    num_data_points: A scalar denoting the number of data points in data.
+    max_num_data_points: A scalar denoting the size of the first dimension of data.
+  """
+  mask = jnp.arange(max_num_data_points) < num_data_points
+  masked_data = data * mask[:, jnp.newaxis]
+  mean = jnp.sum(masked_data, 0) / num_data_points
+  sq_diff = jnp.square((masked_data - mean[jnp.newaxis, :])) * mask[:,jnp.newaxis]
+  std = jnp.sqrt(jnp.sum(sq_diff, axis=0) / num_data_points)
+  normalized_data = (data - mean[jnp.newaxis, :]) / std[jnp.newaxis, :]
+  masked_norm_data = normalized_data * mask[:, jnp.newaxis]
+  return masked_norm_data, mean, std
+
+def unstandardize_data(standardized_data, mean, std, num_data_points, max_num_data_points):
+  orig_data = (standardized_data * std) + mean
+  mask = jnp.arange(max_num_data_points) < num_data_points
+  return orig_data * mask[:,jnp.newaxis]
+
+def unstandardize_params(pred_mean, pred_scale, mean, std):
+  unstd_mean = (pred_mean * std) + mean
+  unstd_scale = jnp.diag(std) @ pred_scale
+  return unstd_mean, unstd_scale
+
+
 class MeanScaleInferenceMachine(object):
 
   def __init__(self,
@@ -306,6 +360,7 @@ class MeanScaleWeightInferenceMachine(object):
                num_decoders=6,
                qkv_dim=512,
                activation_fn=flax.nn.relu,
+               standardize_data=True,
                weight_init=jax.nn.initializers.xavier_uniform()):
     """Creates the model.
 
@@ -326,6 +381,7 @@ class MeanScaleWeightInferenceMachine(object):
     self.data_dim = data_dim
     self.max_k = max_k
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
+    self.standardize_data = standardize_data
     self.tfmr = transformer.EncoderDecoderTransformer.partial(
         target_dim=target_dim,
         max_input_length=max_num_data_points, max_target_length=max_k,
@@ -374,11 +430,10 @@ class MeanScaleWeightInferenceMachine(object):
       of mus, a tensor of shape [batch_size].
     """
     true_means, true_scales, true_log_weights = true_params
-    flat_scales = vmap(vmap(flatten_scale))(true_scales)
-    targets = jnp.concatenate(
-        [true_log_weights[:, :, jnp.newaxis], true_means, flat_scales], axis=-1)
-    return self.tfmr.wasserstein_distance_loss(params, inputs, input_lengths,
-                                               targets, ks, key)
+    flat_true_params = vmap(flatten_gmm_params)(true_means, true_scales, true_log_weights)
+    pred_means, pred_scales, pred_log_ws = self.predict(params, inputs, input_lengths, ks)
+    flat_preds = vmap(flatten_gmm_params)(pred_means, pred_scales, pred_log_ws)
+    return self.tfmr.wasserstein_distance_loss(flat_true_params, ks, flat_preds, key)
 
   def predict(self, params, inputs, input_lengths, ks):
     """Predicts the cluster means for the given data sets.
@@ -397,11 +452,23 @@ class MeanScaleWeightInferenceMachine(object):
           [batch_size, max_k, data_dim, data_dim].
         The predicted log weights, a tensor of shape [batch_size, max_k].
     """
+    if self.standardize_data:
+      inputs, data_mean, data_std = vmap(standardize_data, in_axes=(0,0, None))(
+          inputs, input_lengths, self.max_num_data_points)
+
     raw_outs = self.tfmr.call(params, inputs, input_lengths, ks)
-    log_weights = raw_outs[:, :, 0]
-    mus = raw_outs[:, :, 1:self.data_dim + 1]
-    us = vmap(vmap(unflatten_scale, in_axes=(0, None)), in_axes=(0, None))
-    scales = us(raw_outs[:, :, self.data_dim + 1:], self.data_dim)
+    print("raw outs", raw_outs)
+    mus, scales, log_weights = vmap(unflatten_gmm_params, in_axes=(0,None))(
+        raw_outs, self.data_dim)
+    print("mus after unflat", mus)
+    print("scales after unflat", scales)
+    if self.standardize_data:
+      print("mus", mus)
+      print("scales", scales)
+      print("data mean", data_mean)
+      print("data std", data_std)
+      mus, scales = vmap(vmap(unstandardize_params, in_axes=(0, 0, None, None)))(
+              mus, scales, data_mean, data_std)
     return mus, scales, log_weights
 
   def classify(self, params, inputs, input_lengths, ks):

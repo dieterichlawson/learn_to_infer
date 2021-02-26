@@ -31,8 +31,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 
-flags.DEFINE_enum("model_name", "mean",
-                  ["mean", "mean_scale", "mean_scale_weight"],
+flags.DEFINE_enum("model_name", "mean_scale_weight",
+                  #["mean", "mean_scale", "mean_scale_weight"],
+                  ["mean_scale_weight"],
                   "Model to run")
 flags.DEFINE_integer("num_encoders", 6,
                      "Number of encoder modules in the transformer.")
@@ -53,6 +54,8 @@ flags.DEFINE_integer("max_k", 10,
                      "The maximum number of modes in the data.")
 flags.DEFINE_integer("data_points_per_mode", 25,
                      "Number of data points to include per mode in the data.")
+flags.DEFINE_boolean("standardize_data", False,
+                     "If true, standardize the data before feeding them to the transformer.")
 flags.DEFINE_integer("cov_dof", 10,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_float("mode_var", 1.,
@@ -97,16 +100,18 @@ def make_model(key,
                value_dim=128,
                data_points_per_mode=25,
                max_k=10,
+               standardize_data=False,
                data_dim=2):
   class_dict = {
-      "mean": gmm_models.MeanInferenceMachine,
-      "mean_scale": gmm_models.MeanScaleInferenceMachine,
+      #"mean": gmm_models.MeanInferenceMachine,
+      #"mean_scale": gmm_models.MeanScaleInferenceMachine,
       "mean_scale_weight": gmm_models.MeanScaleWeightInferenceMachine}
 
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k,
       max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
-      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim)
+      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
+      standardize_data=standardize_data)
   params = model.init_params(key)
 
   return model, params
@@ -295,10 +300,10 @@ def make_summarize(
 def make_logdir(config):
   basedir = config.logdir
   exp_dir = (
-      "nheads_%d_nenc_%d_ndec_%d_sepm_%0.1f_data_dim_%d_mink_%d_maxk_%d_dps_per_k_%d"
+      "nheads_%d_nenc_%d_ndec_%d_sepm_%0.1f_data_dim_%d_mink_%d_maxk_%d_dps_per_k_%d_std_data_%s"
       % (config.num_heads, config.num_encoders, config.num_decoders, 
           config.separation_multiplier, config.data_dim, config.min_k, config.max_k,
-          config.data_points_per_mode))
+          config.data_points_per_mode, config.standardize_data))
   return os.path.join(basedir, exp_dir)
 
 
@@ -327,7 +332,8 @@ def main(unused_argv):
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim)
+      data_dim=FLAGS.data_dim,
+      standardize_data=FLAGS.standardize_data)
   loss_fn = make_loss(
       model,
       model_name=FLAGS.model_name,

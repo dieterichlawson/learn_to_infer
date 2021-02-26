@@ -312,20 +312,13 @@ class EncoderDecoderTransformer(nn.Module):
   @classmethod
   def wasserstein_distance_loss(
       cls,
-      params,
-      inputs,
-      input_lengths,
       targets,
       target_lengths,
+      predictions,
       key):
-    batch_size = inputs.shape[0]
+    batch_size = predictions.shape[0]
     max_target_length = targets.shape[1]
     # [batch_size, max_target_length, target_dim]
-    predicted = cls.call(params,
-                         inputs,
-                         input_lengths,
-                         target_lengths,
-                         targets=targets)
     ranges = jnp.tile(
         jnp.arange(max_target_length)[jnp.newaxis, :],
         [batch_size, 1])
@@ -334,7 +327,7 @@ class EncoderDecoderTransformer(nn.Module):
                         jnp.full([batch_size, max_target_length], -jnp.inf))
 
     wdists, _ = jax.vmap(util.atomic_sinkhorn)(
-        predicted, weights, targets, weights,
+        predictions, weights, targets, weights,
         jax.random.split(key, num=batch_size)
     )
     return wdists

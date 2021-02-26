@@ -123,9 +123,9 @@ def agglomerative_fit_and_predict(xs, num_modes):
       affinity="euclidean").fit_predict(xs)
 
 
-METHODS = {"em": em_fit_and_predict,
-           "spectral_rbf": spectral_rbf_fit_and_predict,
-           "agglomerative": agglomerative_fit_and_predict}
+METHODS = {"em": em_fit_and_predict}
+           #"spectral_rbf": spectral_rbf_fit_and_predict,
+           #"agglomerative": agglomerative_fit_and_predict}
 
 
 def compute_baseline_metrics(xs, cs,

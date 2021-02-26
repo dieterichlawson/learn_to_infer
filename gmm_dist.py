@@ -81,6 +81,22 @@ def sample_wishart(key, dof, scale):
   return jnp.einsum("ki,kj->ij", xs, xs)
 
 
+def sample_scaled_wishart(key, dof, scale):
+  """Samples W from a scaled wishart distribution with E[W] = scale.
+
+  Args:
+    key: A JAX PRNG key.
+    dof: The degrees of freedom, higher means the distribution is more
+      concentrated about scale.
+    scale: The expected value of the distribution, a PSD [d,d] matrix.
+
+  Returns:
+    A sample from W(dof, (1/(dof-d-1))*scale)
+  """
+  data_dim = scale.shape[0]
+  return sample_wishart(key, dof, (1./(dof-data_dim-1))*scale)
+
+
 def sample_scaled_inverse_wishart(key, dof, scale):
   """Samples W from a scaled inverse wishart distribution with E[W^-1] = scale.
 
