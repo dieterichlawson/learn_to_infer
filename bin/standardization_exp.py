@@ -5,7 +5,7 @@ parser = argparse.ArgumentParser(description='Run L2I commands.')
 
 parser.add_argument('--init_tpus', type=bool, default=True, 
                     help='If true, start new TPUs for these commands') 
-parser.add_argument('--dry_run', type=bool, default=True,
+parser.add_argument('--dry_run', type=bool, default=False,
                     help='If true, do a dry run printing commands.')
 
 args = parser.parse_args()
