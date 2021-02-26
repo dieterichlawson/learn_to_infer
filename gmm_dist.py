@@ -171,7 +171,7 @@ def sample_masked_gmm(key, k, max_k, max_num_data_points, params):
   return xs, cs
 
 
-def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
+def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
                           separation_mult):
   """Samples the parameters for a Gaussian mixture model.
 
@@ -191,6 +191,7 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
       matrices.
     cov_shape: A [data_dim, data_dim] PSD matrix used to compute the shape prior
       for the covariance matrices.
+    cov_prior: Either "wishart" or "inv_wishart", the prior to use for the covariance matrix.
     separation_mult: The multiplier for how separated the modes should be.
   Returns:
     mus: A [max_k, data_dim] set of mixture mode means. Only the first k entries
@@ -201,8 +202,12 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
       true mixture weights are in the first k entries.
   """
   key1, key2, key3 = jax.random.split(key, num=3)
-  covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
-      jax.random.split(key1, num=max_k), cov_dof, cov_shape)
+  if cov_prior == "inv_wishart":
+    covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
+        jax.random.split(key1, num=max_k), cov_dof, cov_shape)
+  else:
+    covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
+        jax.random.split(key1, num=max_k), cov_dof, cov_shape)
   max_diag = jnp.amax(vmap(jnp.diag)(covs))
   mus = sample_spaced_means(key2, max_k, max_diag*separation_mult, data_dim)
   raw_ws = jax.random.normal(key3, shape=[max_k])*0.5
@@ -213,7 +218,7 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
   return mus, covs, log_ws
 
 
-def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape,
+def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
                           log_weights, separation_mult):
   """Samples the parameters for a Gaussian mixture model with a wishart prior.
 
@@ -244,8 +249,13 @@ def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape,
       true mixture weights are in the first k entries.
   """
   key1, key2 = jax.random.split(key)
-  covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
-      jax.random.split(key1, num=max_k), cov_dof, cov_shape)
+  if cov_prior == "inv_wishart":
+    covs = vmap(sample_scaled_inverse_wishart, in_axes=(0, None, None))(
+        jax.random.split(key1, num=max_k), cov_dof, cov_shape)
+  else:
+    covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
+        jax.random.split(key1, num=max_k), cov_dof, cov_shape)
+
   max_diag = jnp.amax(vmap(jnp.diag)(covs))
   mus = sample_spaced_means(key2, max_k, max_diag*separation_mult, data_dim)
   cond = jnp.arange(max_k) < k
@@ -406,11 +416,11 @@ def batch_with_random_mu_random_ks(key, batch_size, min_k, max_k,
 
 
 def batch_with_random_mu_cov_fixed_ks(key, ks, max_k, max_num_data_points,
-                                      data_dim, cov_dof, cov_shape, log_ws,
+                                      data_dim, cov_dof, cov_shape, cov_prior, log_ws,
                                       separation_mult):
 
   def sample_params_fn(key, k, max_k, data_dim):
-    return sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape,
+    return sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
                                  log_ws, separation_mult)
   xs, cs, params = sample_random_gmm_batch(
       key, ks, max_k, max_num_data_points, data_dim, sample_params_fn)
@@ -422,26 +432,24 @@ def batch_with_random_mu_cov_fixed_ks(key, ks, max_k, max_num_data_points,
 
 def batch_with_random_mu_cov_random_ks(
     key, batch_size, min_k, max_k, max_num_data_points, data_dim, cov_dof,
-    cov_shape, log_ws, separation_mult):
+    cov_shape, cov_prior, log_ws, separation_mult):
   k1, k2 = jax.random.split(key)
   ks = jax.random.choice(
       k1, jnp.arange(min_k, stop=max_k + 1), shape=(batch_size,), replace=True)
 
-  xs, cs, params = batch_with_random_mu_cov_fixed_ks(k2, ks, max_k,
-                                                     max_num_data_points,
-                                                     data_dim, cov_dof,
-                                                     cov_shape, log_ws,
-                                                     separation_mult)
+  xs, cs, params = batch_with_random_mu_cov_fixed_ks(
+          k2, ks, max_k, max_num_data_points, data_dim, 
+          cov_dof, cov_shape, cov_prior, log_ws, separation_mult)
 
   return xs, cs, ks, params
 
 
 def batch_with_all_random_params_fixed_ks(key, ks, max_k, max_num_data_points,
-                                          data_dim, cov_dof, cov_shape,
+                                          data_dim, cov_dof, cov_shape, cov_prior,
                                           separation_mult):
 
   def sample_params_fn(key, k, max_k, data_dim):
-    return sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape,
+    return sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
                                  separation_mult)
 
   xs, cs, params = sample_random_gmm_batch(key, ks, max_k, max_num_data_points,
@@ -454,13 +462,13 @@ def batch_with_all_random_params_fixed_ks(key, ks, max_k, max_num_data_points,
 
 def batch_with_all_random_params_random_ks(
     key, batch_size, min_k, max_k, max_num_data_points, data_dim, cov_dof,
-    cov_shape, separation_mult):
+    cov_shape, cov_prior, separation_mult):
   k1, k2 = jax.random.split(key)
   ks = jax.random.choice(k1, jnp.arange(min_k, stop=max_k+1),
                          shape=(batch_size,), replace=True)
 
   xs, cs, params = batch_with_all_random_params_fixed_ks(
-      k2, ks, max_k, max_num_data_points, data_dim, cov_dof, cov_shape,
+      k2, ks, max_k, max_num_data_points, data_dim, cov_dof, cov_shape, cov_prior,
       separation_mult)
 
   return xs, cs, ks, params
@@ -468,7 +476,7 @@ def batch_with_all_random_params_random_ks(
 
 def sample_batch_random_ks(
     key, sampling_type, batch_size, min_k, max_k, data_points_per_mode,
-    data_dim, mode_variance, cov_dof, separation_mult):
+    data_dim, mode_variance, cov_dof, cov_prior, separation_mult):
   if sampling_type == "mean":
     xs, cs, ks, params = batch_with_random_mu_random_ks(
         key, batch_size, min_k, max_k,
@@ -478,18 +486,18 @@ def sample_batch_random_ks(
     xs, cs, ks, params = batch_with_random_mu_cov_random_ks(
         key, batch_size, min_k, max_k,
         max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), jnp.zeros([max_k]), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), separation_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, ks, params = batch_with_all_random_params_random_ks(
         key, batch_size, min_k, max_k,
         max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, separation_mult)
   return xs, cs, ks, params
 
 
 def sample_batch_fixed_ks(
     key, sampling_type, ks, max_k, data_points_per_mode, data_dim,
-    mode_variance, cov_dof, separation_mult):
+    mode_variance, cov_dof, cov_prior, separation_mult):
   if sampling_type == "mean":
     xs, cs, params = batch_with_random_mu_fixed_ks(
         key, ks, max_k, max_k*data_points_per_mode, data_dim,
@@ -497,17 +505,17 @@ def sample_batch_fixed_ks(
   elif sampling_type == "mean_scale":
     xs, cs, params = batch_with_random_mu_cov_fixed_ks(
         key, ks, max_k, max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), jnp.zeros([max_k]), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), separation_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, params = batch_with_all_random_params_fixed_ks(
         key, ks, max_k, max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, separation_mult)
   return xs, cs, params
 
 
 def sample_batch_fixed_ks2(
     key, sampling_type, ks, max_k, max_num_data_points, data_dim,
-    mode_variance, cov_dof, separation_mult):
+    mode_variance, cov_dof, cov_prior, separation_mult):
   if sampling_type == "mean":
     xs, cs, params = batch_with_random_mu_fixed_ks(
         key, ks, max_k, max_num_data_points, data_dim,
@@ -515,11 +523,11 @@ def sample_batch_fixed_ks2(
   elif sampling_type == "mean_scale":
     xs, cs, params = batch_with_random_mu_cov_fixed_ks(
         key, ks, max_k, max_num_data_points, data_dim,
-        cov_dof, jnp.eye(data_dim), jnp.zeros([max_k]), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), separation_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, params = batch_with_all_random_params_fixed_ks(
         key, ks, max_k, max_num_data_points, data_dim,
-        cov_dof, jnp.eye(data_dim), separation_mult)
+        cov_dof, jnp.eye(data_dim), cov_prior, separation_mult)
   return xs, cs, params
 
 

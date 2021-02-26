@@ -60,6 +60,9 @@ flags.DEFINE_boolean("standardize_data", False,
                      "If true, standardize the data before feeding them to the transformer.")
 flags.DEFINE_integer("cov_dof", 10,
                      "Degrees of freedom in sampling the random covariances.")
+flags.DEFINE_enum("cov_prior", "inv_wishart",
+                  ["inv_wishart", "wishart"],
+                  "The prior to use for the covariance matrix.")
 flags.DEFINE_float("mode_var", 1.,
                    "The variance of the modes in the GMM used when "
                    "not sampling.")
@@ -125,6 +128,7 @@ def make_loss(model,
               max_k=10,
               data_points_per_mode=25,
               cov_dof=10,
+              cov_prior="inv_wishart",
               mode_var=1.,
               separation_mult=2.,
               data_dim=2,
@@ -133,7 +137,7 @@ def make_loss(model,
   def sample_train_batch(key):
     return gmm_dist.sample_batch_random_ks(
         key, model_name, batch_size, min_k, max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
 
   def loss(params, key):
     key, subkey = jax.random.split(key)
@@ -152,6 +156,7 @@ def make_summarize(
     max_k=10,
     data_points_per_mode=25,
     cov_dof=10,
+    cov_prior="inv_wishart",
     separation_mult=2.,
     data_dim=2,
     mode_var=1.,
@@ -160,14 +165,14 @@ def make_summarize(
   def sample_eval_batch(key):
     return gmm_dist.sample_batch_random_ks(
         key, model_name, eval_batch_size, min_k, max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
   def sample_single_gmm(key, num_modes):
     xs, cs, params = gmm_dist.sample_batch_fixed_ks(
         key, model_name, jnp.array([num_modes]), max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
 
     return xs[0], cs[0], (params[0][0], params[1][0], params[2][0])
 
@@ -347,6 +352,7 @@ def main(unused_argv):
       max_k=FLAGS.max_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
+      cov_prior=FLAGS.cov_prior,
       separation_mult=FLAGS.separation_multiplier,
       mode_var=FLAGS.mode_var,
       data_dim=FLAGS.data_dim,
@@ -358,6 +364,7 @@ def main(unused_argv):
       max_k=FLAGS.max_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
+      cov_prior=FLAGS.cov_prior,
       separation_mult=FLAGS.separation_multiplier,
       data_dim=FLAGS.data_dim,
       mode_var=FLAGS.mode_var,
