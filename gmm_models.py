@@ -181,8 +181,6 @@ def unflatten_gmm_params(flat_params, original_dim):
   mus = flat_params[:, 1:original_dim+1]
   scales = vmap(unflatten_scale, in_axes=(0, None))(
           flat_params[:, original_dim+1:], original_dim)
-  print("mus in unflat", mus)
-  print("scales in unflat", scales)
   return mus, scales, log_weights
 
 def standardize_data(data, num_data_points, max_num_data_points):
@@ -457,16 +455,9 @@ class MeanScaleWeightInferenceMachine(object):
           inputs, input_lengths, self.max_num_data_points)
 
     raw_outs = self.tfmr.call(params, inputs, input_lengths, ks)
-    print("raw outs", raw_outs)
     mus, scales, log_weights = vmap(unflatten_gmm_params, in_axes=(0,None))(
         raw_outs, self.data_dim)
-    print("mus after unflat", mus)
-    print("scales after unflat", scales)
     if self.standardize_data:
-      print("mus", mus)
-      print("scales", scales)
-      print("data mean", data_mean)
-      print("data std", data_std)
       mus, scales = vmap(vmap(unstandardize_params, in_axes=(0, 0, None, None)))(
               mus, scales, data_mean, data_std)
     return mus, scales, log_weights
