@@ -48,6 +48,8 @@ flags.DEFINE_integer("value_dim_per_head", 32,
                      "for each head.")
 flags.DEFINE_integer("data_dim", 2,
                      "The dimension of the points to cluster.")
+flags.DEFINE_integer("k", None,
+                     "The number of modes in the data. If provided, overrides min_k and max_k.")
 flags.DEFINE_integer("min_k", 2,
                      "The minimum number of modes in the data.")
 flags.DEFINE_integer("max_k", 10,
@@ -309,6 +311,10 @@ def make_logdir(config):
 
 def main(unused_argv):
   assert FLAGS.cov_dof >= FLAGS.data_dim + 2, "Wishart DOF must be >= 2 + data dim."
+
+  if FLAGS.k is not None:
+    FLAGS.min_k = FLAGS.k
+    FLAGS.max_k = FLAGS.k
 
   if FLAGS.debug_nans:
     config.update("jax_debug_nans", True)
