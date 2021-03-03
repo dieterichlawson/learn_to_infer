@@ -1,4 +1,4 @@
-import orchestration_util as orch
+import orchestration as orch
 import argparse
 
 parser = argparse.ArgumentParser(description='Run L2I commands.')
@@ -9,6 +9,8 @@ parser.add_argument('--dry_run', action="store_true",
                     help='Do a dry run printing commands.')
 
 args = parser.parse_args()
+
+experiment_name = "standardization_exp"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
@@ -38,6 +40,6 @@ job_args = {
 commands = orch.make_commands(command, job_args)
 
 if args.init_tpus:
-  orch.initialize_tpus(len(commands), args.dry_run)
+  orch.initialize_tpus(experiment_name, len(commands), args.dry_run)
 
-orch.run_commands(commands, args.dry_run)
+orch.run_commands(experiment_name, commands, args.dry_run)

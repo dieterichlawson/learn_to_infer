@@ -39,14 +39,14 @@ def allow_ssh(dry_run):
                 " --direction=INGRESS --priority=1000 --network=default --action=ALLOW"
                 " --rules=tcp:22 --source-ranges=0.0.0.0/0", dry_run)
 
-def initialize_tpus(num_tpus, dry_run):
+def initialize_tpus(basename, num_tpus, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
   # start the tpus
   print("Creating %d tpus..." % num_tpus)
   os.system("seq 1 %d |"
-            " parallel %s gcloud alpha compute tpus tpu-vm create l2i_tpu_{}" 
+            " parallel %s gcloud alpha compute tpus tpu-vm create l2i_%s_{}" 
             " --zone europe-west4-a --accelerator-type v3-8"
-            " --version v2-alpha" % (num_tpus, dry_run_string))
+            " --version v2-alpha" % (num_tpus, dry_run_string, basename))
 
   allow_ssh(dry_run)
   if not dry_run:
@@ -55,15 +55,15 @@ def initialize_tpus(num_tpus, dry_run):
   allow_ssh(dry_run)
   print("Preparing VMs...")
   os.system("seq 1 %d |"
-            " parallel %s 'gcloud alpha compute tpus tpu-vm ssh l2i_tpu_{} --zone europe-west4-a"
+            " parallel %s 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
             " -- \"git clone https://github.com/dieterichlawson/learn_to_infer.git"
-            " && pip3 install -r learn_to_infer/requirements.txt\"'" % (num_tpus, dry_run_string))
+            " && pip3 install -r learn_to_infer/requirements.txt\"'" % (num_tpus, dry_run_string, basename))
 
-def wait_till_tpus_up(num_tpus, max_retries=3):
+def wait_till_tpus_up(basename, num_tpus, max_retries=3):
 
   def check_tpu(tpu_num):
-    cmd = ("gcloud alpha compute tpus tpu-vm ssh l2i_tpu_%d"
-           " --zone europe-west4-a --command=exit" % tpu_num)
+    cmd = ("gcloud alpha compute tpus tpu-vm ssh l2i_%s_%d"
+           " --zone europe-west4-a --command=exit" % (basename, tpu_num))
     up = False
     num_tries = 0
     while not up and num_tries < max_retries:
@@ -88,12 +88,12 @@ def wait_till_tpus_up(num_tpus, max_retries=3):
     down_tpus = [str(i+1) for i,b in enumerate(results) if not b]
     print("TPUs %s failed to come up after %d retries." % (", ".join(down_tpus), max_retries))
 
-def run_commands(commands, dry_run):
+def run_commands(basename, commands, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
   tmux_cmd = "tmux new-session -d \"%s; read;\""
   tmux_cmds = [tmux_cmd % c for c in commands]
   tmux_cmd_string = "\n".join(tmux_cmds)
   allow_ssh(dry_run)
   os.system("echo '%s' |"
-            " parallel %s gcloud alpha compute tpus tpu-vm ssh l2i_tpu_{#}"
-            " --zone europe-west4-a -- {}" % (tmux_cmd_string, dry_run_string))
+            " parallel %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{#}"
+            " --zone europe-west4-a -- {}" % (tmux_cmd_string, dry_run_string, basename))
