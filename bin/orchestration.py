@@ -50,7 +50,7 @@ def initialize_tpus(basename, num_tpus, dry_run):
 
   allow_ssh(dry_run)
   if not dry_run:
-    wait_till_tpus_up(num_tpus)
+    wait_till_tpus_up(basename, num_tpus)
 
   allow_ssh(dry_run)
   print("Preparing VMs...")
@@ -73,6 +73,7 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
       num_tries += 1
     return up
 
+  print("Waiting for TPUs to come up...")
   pool = ThreadPool(multiprocessing.cpu_count())
   results = []
   for i in range(1, num_tpus + 1):
@@ -83,7 +84,7 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
   pool.join()
   results = [r.get() for r in results]
   if all(results):
-    print("All TPUs up")
+    print("All TPUs up.")
   else:
     down_tpus = [str(i+1) for i,b in enumerate(results) if not b]
     print("TPUs %s failed to come up after %d retries." % (", ".join(down_tpus), max_retries))
