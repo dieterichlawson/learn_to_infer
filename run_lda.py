@@ -28,6 +28,7 @@ from jax import vmap
 from jax.config import config
 import jax.experimental.optimizers
 import jax.numpy as jnp
+import numpy as onp
 
 import sklearn
 from sklearn import decomposition
@@ -135,8 +136,8 @@ def make_topic_word_model(key,
     for i in range(batch_size):
       out = sklearn_lda(
               n_components=num_topics, 
-              doc_topic_prior=jnp.ones([num_topics]),
-              topic_word_prior=jnp.ones([num_topics])).fit(docs_word_counts[i])
+              doc_topic_prior=1.,
+              topic_word_prior=1.).fit(docs_word_counts[i])
       topic_logits = jnp.log(out.components_)
       normalized_log_topic_params = jax.nn.log_softmax(topic_logits, axis=1)
       out_params.append(normalized_log_topic_params)
