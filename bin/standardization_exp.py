@@ -3,10 +3,10 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Run L2I commands.')
 
-parser.add_argument('--init_tpus', type=bool, default=True, 
-                    help='If true, start new TPUs for these commands') 
-parser.add_argument('--dry_run', type=bool, default=False,
-                    help='If true, do a dry run printing commands.')
+parser.add_argument('--init_tpus', action="store_true",
+                    help='Start new TPUs for these commands')
+parser.add_argument('--dry_run', action="store_true",
+                    help='Do a dry run printing commands.')
 
 args = parser.parse_args()
 
@@ -22,7 +22,7 @@ job_args = {
   "value_dim_per_head": 32,
   "k": [2, 3, 4],
   "data_points_per_mode": 50,
-  "standardize": [True, False],
+  "standardize_data": [True, False],
   "cov_prior": ["wishart", "inv_wishart"],
   "cov_dof": [4, 10, 25],
   "separation_multiplier": 2.,
