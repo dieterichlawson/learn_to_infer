@@ -61,7 +61,7 @@ flags.DEFINE_integer("data_points_per_mode", 25,
                      "Number of data points to include per mode in the data.")
 flags.DEFINE_boolean("standardize_data", False,
                      "If true, standardize the data before feeding them to the transformer.")
-flags.DEFINE_integer("cov_dof", 10,
+flags.DEFINE_integer("cov_dof", None,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_enum("cov_prior", "inv_wishart",
                   ["inv_wishart", "wishart"],
@@ -329,6 +329,9 @@ def make_logdir(config):
 
 
 def main(unused_argv):
+  if FLAGS.cov_dof is None:
+    FLAGS.cov_dof = FLAGS.data_dim + 2
+
   assert FLAGS.cov_dof >= FLAGS.data_dim + 2, "Wishart DOF must be >= 2 + data dim."
 
   if FLAGS.k is not None:
