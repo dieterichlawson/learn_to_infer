@@ -245,7 +245,6 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior
   else:
     covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
         jax.random.split(key1, num=max_k), cov_dof, cov_shape)
-  trace = jnp.sum(vmap(jnp.diag)(covs), axis=-1)
   mus = sample_spaced_means(key2, max_k, covs, dist_mult, data_dim)
   raw_ws = jax.random.normal(key3, shape=[max_k])*0.5
   cond = jnp.arange(max_k) < k
@@ -293,7 +292,6 @@ def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior
     covs = vmap(sample_scaled_wishart, in_axes=(0, None, None))(
         jax.random.split(key1, num=max_k), cov_dof, cov_shape)
 
-  max_diag = jnp.amax(vmap(jnp.diag)(covs))
   mus = sample_spaced_means(key2, max_k, covs, dist_mult, data_dim)
   cond = jnp.arange(max_k) < k
   log_ws = jnp.where(cond,
@@ -328,7 +326,6 @@ def sample_gmm_mu(key, k, max_k, data_dim, cov, log_weights, dist_mult):
       true mixture weights are in the first k entries.
   """
   covs = jnp.tile(cov[jnp.newaxis, :, :], [max_k, 1, 1])
-  max_diag = jnp.amax(jnp.diag(cov))
   mus = sample_spaced_means(key, max_k, covs, dist_mult, data_dim)
   cond = jnp.arange(max_k) < k
   log_ws = jnp.where(cond,
