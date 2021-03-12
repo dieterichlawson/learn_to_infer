@@ -25,9 +25,12 @@ import train
 
 from absl import app
 from absl import flags
+
 import jax
 from jax.config import config
 import jax.numpy as jnp
+
+import scipy as oscipy
 import matplotlib.pyplot as plt
 
 
@@ -66,9 +69,8 @@ flags.DEFINE_enum("cov_prior", "inv_wishart",
 flags.DEFINE_float("mode_var", 1.,
                    "The variance of the modes in the GMM used when "
                    "not sampling.")
-flags.DEFINE_float("separation_multiplier", 3.,
-                   "Number to multiply the maximum covariance diag element by "
-                   "when computing mean separation.")
+flags.DEFINE_float("dist_multiplier", .95,
+                   "Confidence interval that will be nonoverlapping when sampling the meaans")
 flags.DEFINE_boolean("parallel", True,
                      "If possible, train in parallel across devices.")
 flags.DEFINE_integer("batch_size", 64,
@@ -130,14 +132,14 @@ def make_loss(model,
               cov_dof=10,
               cov_prior="inv_wishart",
               mode_var=1.,
-              separation_mult=2.,
+              dist_mult=2.,
               data_dim=2,
               batch_size=128):
 
   def sample_train_batch(key):
     return gmm_dist.sample_batch_random_ks(
         key, model_name, batch_size, min_k, max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   def loss(params, key):
     key, subkey = jax.random.split(key)
@@ -157,7 +159,7 @@ def make_summarize(
     data_points_per_mode=25,
     cov_dof=10,
     cov_prior="inv_wishart",
-    separation_mult=2.,
+    dist_mult=2.,
     data_dim=2,
     mode_var=1.,
     eval_batch_size=256):
@@ -165,14 +167,14 @@ def make_summarize(
   def sample_eval_batch(key):
     return gmm_dist.sample_batch_random_ks(
         key, model_name, eval_batch_size, min_k, max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
   def sample_single_gmm(key, num_modes):
     xs, cs, params = gmm_dist.sample_batch_fixed_ks(
         key, model_name, jnp.array([num_modes]), max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, cov_prior, separation_mult)
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
     return xs[0], cs[0], (params[0][0], params[1][0], params[2][0])
 
@@ -307,10 +309,22 @@ def make_summarize(
 def make_logdir(config):
   basedir = config.logdir
   exp_dir = (
-      "nheads_%d_nenc_%d_ndec_%d_sepm_%0.1f_data_dim_%d_mink_%d_maxk_%d_dps_per_k_%d_stdize_%s_cov_prior_%s_cov_dof_%d"
-      % (config.num_heads, config.num_encoders, config.num_decoders, 
-          config.separation_multiplier, config.data_dim, config.min_k, config.max_k,
-          config.data_points_per_mode, config.standardize_data, config.cov_prior, config.cov_dof))
+      "nheads_%d"
+      "_nenc_%d"
+      "_ndec_%d"
+      "_sepm_%0.2f"
+      "_data_dim_%d"
+      "_mink_%d"
+      "_maxk_%d"
+      "_dps_per_k_%d"
+      "_stdize_%s"
+      "_cov_prior_%s"
+      "_cov_dof_%d" % (
+        config.num_heads, config.num_encoders, config.num_decoders, 
+        config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
+        config.data_points_per_mode, config.standardize_data, config.cov_prior, 
+        config.cov_dof)
+      )
   return os.path.join(basedir, exp_dir)
 
 
@@ -331,6 +345,8 @@ def main(unused_argv):
 
   if FLAGS.plot_sklearn_comparison:
     assert FLAGS.min_k == 3 and FLAGS.max_k == 3
+
+  FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
   key = jax.random.PRNGKey(0)
   key, subkey = jax.random.split(key)
@@ -353,7 +369,7 @@ def main(unused_argv):
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,
-      separation_mult=FLAGS.separation_multiplier,
+      dist_mult=FLAGS.dist_multiplier,
       mode_var=FLAGS.mode_var,
       data_dim=FLAGS.data_dim,
       batch_size=FLAGS.batch_size)
@@ -365,7 +381,7 @@ def main(unused_argv):
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,
-      separation_mult=FLAGS.separation_multiplier,
+      dist_mult=FLAGS.dist_multiplier,
       data_dim=FLAGS.data_dim,
       mode_var=FLAGS.mode_var,
       eval_batch_size=FLAGS.eval_batch_size)
