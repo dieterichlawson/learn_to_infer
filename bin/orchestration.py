@@ -39,7 +39,13 @@ def allow_ssh(dry_run):
                 " --direction=INGRESS --priority=1000 --network=default --action=ALLOW"
                 " --rules=tcp:22 --source-ranges=0.0.0.0/0", dry_run)
 
-def initialize_tpus(basename, num_tpus, dry_run):
+def create_and_init_tpus(basename, num_tpus, dry_run):
+  create_tpus(basename, num_tpus, dry_run)
+  if ensure_tpus_up(basename, num_tpus, dry_run):
+    print("Not initializing TPUs")
+    initialize_tpus(basename, num_tpus, dry_run)
+
+def create_tpus(basename, num_tpus, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
   # start the tpus
   print("Creating %d tpus..." % num_tpus)
@@ -48,11 +54,16 @@ def initialize_tpus(basename, num_tpus, dry_run):
             " --zone europe-west4-a --accelerator-type v3-8"
             " --version v2-alpha" % (num_tpus, dry_run_string, basename))
 
+def ensure_tpus_up(basename, num_tpus, dry_run):
   allow_ssh(dry_run)
   if not dry_run:
-    wait_till_tpus_up(basename, num_tpus)
+    return wait_till_tpus_up(basename, num_tpus)
+  else:
+    return True
 
+def initialize_tpus(basename, num_tpus, dry_run):
   allow_ssh(dry_run)
+  dry_run_string = "--dry-run" if dry_run else ""
   print("Preparing VMs...")
   os.system("seq 1 %d |"
             " parallel %s 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
@@ -85,9 +96,11 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
   results = [r.get() for r in results]
   if all(results):
     print("All TPUs up.")
+    return True
   else:
     down_tpus = [str(i+1) for i,b in enumerate(results) if not b]
     print("TPUs %s failed to come up after %d retries." % (", ".join(down_tpus), max_retries))
+    return False
 
 def run_commands(basename, commands, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
