@@ -170,11 +170,11 @@ def parallel_train_loop(key,
   @functools.partial(jax.pmap, axis_name="batch")
   def train_step(optimizer, key):
     key, subkey = jax.random.split(key)
-    loss_grad = jax.grad(loss_fn, argnums=0)(optimizer.target, key)
+    loss_grad = jax.grad(loss_fn, argnums=0)(optimizer.target, subkey)
     loss_grad = jax.lax.pmean(loss_grad, "batch")
     new_optimizer = optimizer.apply_gradient(
         loss_grad, learning_rate=lr_fn(optimizer.state.step))
-    return new_optimizer, subkey
+    return new_optimizer, key
 
   sw = SummaryWriter(logdir)
 

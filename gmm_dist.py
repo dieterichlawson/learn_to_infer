@@ -248,9 +248,7 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior
   mus = sample_spaced_means(key2, max_k, covs, dist_mult, data_dim)
   raw_ws = jax.random.normal(key3, shape=[max_k])*0.5
   cond = jnp.arange(max_k) < k
-  log_ws = jnp.where(cond,
-                     raw_ws,
-                     jnp.ones_like(raw_ws)*-jnp.inf)
+  log_ws = jnp.where(cond, raw_ws, jnp.ones_like(raw_ws)*-jnp.inf)
   return mus, covs, log_ws
 
 
