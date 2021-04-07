@@ -59,8 +59,6 @@ flags.DEFINE_integer("max_k", 10,
                      "The maximum number of modes in the data.")
 flags.DEFINE_integer("data_points_per_mode", 25,
                      "Number of data points to include per mode in the data.")
-flags.DEFINE_boolean("standardize_data", False,
-                     "If true, standardize the data before feeding them to the transformer.")
 flags.DEFINE_integer("cov_dof", None,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_enum("cov_prior", "inv_wishart",
@@ -107,7 +105,6 @@ def make_model(key,
                value_dim=128,
                data_points_per_mode=25,
                max_k=10,
-               standardize_data=False,
                data_dim=2):
   class_dict = {
       #"mean": gmm_models.MeanInferenceMachine,
@@ -117,8 +114,7 @@ def make_model(key,
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k,
       max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
-      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
-      standardize_data=standardize_data)
+      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim)
   params = model.init_params(key)
 
   return model, params
@@ -317,12 +313,11 @@ def make_logdir(config):
       "_mink_%d"
       "_maxk_%d"
       "_dps_per_k_%d"
-      "_stdize_%s"
       "_cov_prior_%s"
       "_cov_dof_%d" % (
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
-        config.data_points_per_mode, config.standardize_data, config.cov_prior, 
+        config.data_points_per_mode, config.cov_prior, 
         config.cov_dof)
       )
   return os.path.join(basedir, exp_dir)
@@ -362,8 +357,7 @@ def main(unused_argv):
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim,
-      standardize_data=FLAGS.standardize_data)
+      data_dim=FLAGS.data_dim)
   loss_fn = make_loss(
       model,
       model_name=FLAGS.model_name,

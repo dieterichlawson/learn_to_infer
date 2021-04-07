@@ -358,7 +358,6 @@ class MeanScaleWeightInferenceMachine(object):
                num_decoders=6,
                qkv_dim=512,
                activation_fn=flax.nn.relu,
-               standardize_data=True,
                weight_init=jax.nn.initializers.xavier_uniform()):
     """Creates the model.
 
@@ -379,7 +378,6 @@ class MeanScaleWeightInferenceMachine(object):
     self.data_dim = data_dim
     self.max_k = max_k
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
-    self.standardize_data = standardize_data
     self.tfmr = transformer.EncoderDecoderTransformer.partial(
         target_dim=target_dim,
         max_input_length=max_num_data_points, max_target_length=max_k,
@@ -429,9 +427,8 @@ class MeanScaleWeightInferenceMachine(object):
     """
     true_means, true_scales, true_log_weights = true_params
     flat_true_params = vmap(flatten_gmm_params)(true_means, true_scales, true_log_weights)
-    pred_means, pred_scales, pred_log_ws = self.predict(params, inputs, input_lengths, ks)
-    flat_preds = vmap(flatten_gmm_params)(pred_means, pred_scales, pred_log_ws)
-    return self.tfmr.wasserstein_distance_loss(flat_true_params, ks, flat_preds, key)
+    preds = self.tfmr.call(params, inputs, input_lengths, ks)
+    return self.tfmr.wasserstein_distance_loss(flat_true_params, ks, preds, key)
 
   def predict(self, params, inputs, input_lengths, ks):
     """Predicts the cluster means for the given data sets.
@@ -450,16 +447,9 @@ class MeanScaleWeightInferenceMachine(object):
           [batch_size, max_k, data_dim, data_dim].
         The predicted log weights, a tensor of shape [batch_size, max_k].
     """
-    if self.standardize_data:
-      inputs, data_mean, data_std = vmap(standardize_data, in_axes=(0,0, None))(
-          inputs, input_lengths, self.max_num_data_points)
-
     raw_outs = self.tfmr.call(params, inputs, input_lengths, ks)
     mus, scales, log_weights = vmap(unflatten_gmm_params, in_axes=(0,None))(
         raw_outs, self.data_dim)
-    if self.standardize_data:
-      mus, scales = vmap(vmap(unstandardize_params, in_axes=(0, 0, None, None)))(
-              mus, scales, data_mean, data_std)
     return mus, scales, log_weights
 
   def classify(self, params, inputs, input_lengths, ks):
