@@ -104,10 +104,10 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
 
 def run_commands(basename, commands, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
-  tmux_cmd = "tmux new-session -d \"%s; read;\""
-  tmux_cmds = [tmux_cmd % c for c in commands]
+  tmux_cmd = "%d	tmux new-session -d \"%s --tag=%d; read;\""
+  tmux_cmds = [tmux_cmd % (i+1, c, i+1) for i, c in enumerate(commands)]
   tmux_cmd_string = "\n".join(tmux_cmds)
   allow_ssh(dry_run)
   os.system("echo '%s' |"
-            " parallel %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{#}"
-            " --zone europe-west4-a -- {}" % (tmux_cmd_string, dry_run_string, basename))
+            " parallel --colsep '	' %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{1}"
+            " --zone europe-west4-a -- {2}" % (tmux_cmd_string, dry_run_string, basename))

@@ -26,7 +26,6 @@ job_args = {
   "value_dim_per_head": 32,
   "k": [2, 4, 8, 16],
   "data_points_per_mode": 50,
-  "standardize_data": False,
   "cov_prior": "inv_wishart",
   "dist_multiplier": [.68, .95, .99],
   "batch_size": 64,

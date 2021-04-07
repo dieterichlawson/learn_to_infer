@@ -93,6 +93,8 @@ flags.DEFINE_boolean("debug_nans", False,
 flags.DEFINE_boolean("plot_sklearn_comparison", False,
                      "If true, generate the sklearn clustering comparison "
                      "plots.")
+flags.DEFINE_string("tag", "",
+                    "String to append to the logdir.")
 
 FLAGS = flags.FLAGS
 
@@ -314,11 +316,12 @@ def make_logdir(config):
       "_maxk_%d"
       "_dps_per_k_%d"
       "_cov_prior_%s"
-      "_cov_dof_%d" % (
+      "_cov_dof_%d" 
+      "_tpu%s" % (
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
         config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof)
+        config.cov_dof, config.tag)
       )
   return os.path.join(basedir, exp_dir)
 
