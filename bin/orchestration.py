@@ -66,9 +66,10 @@ def initialize_tpus(basename, num_tpus, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
   print("Preparing VMs...")
   os.system("seq 1 %d |"
-            " parallel %s 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+            " parallel %s --jobs %d 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
             " -- \"git clone https://github.com/dieterichlawson/learn_to_infer.git"
-            " && pip3 install -r learn_to_infer/requirements.txt\"'" % (num_tpus, dry_run_string, basename))
+            " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
+              num_tpus, dry_run_string, num_tpus, basename))
 
 def wait_till_tpus_up(basename, num_tpus, max_retries=3):
 
@@ -85,7 +86,7 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
     return up
 
   print("Waiting for TPUs to come up...")
-  pool = ThreadPool(multiprocessing.cpu_count())
+  pool = ThreadPool(num_tpus)
   results = []
   for i in range(1, num_tpus + 1):
     results.append(pool.apply_async(check_tpu, (i,)))
@@ -103,11 +104,12 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
     return False
 
 def run_commands(basename, commands, dry_run):
+  num_tpus = len(commands)
   dry_run_string = "--dry-run" if dry_run else ""
   tmux_cmd = "%d	tmux new-session -d \"%s --tag=%d; read;\""
   tmux_cmds = [tmux_cmd % (i+1, c, i+1) for i, c in enumerate(commands)]
   tmux_cmd_string = "\n".join(tmux_cmds)
   allow_ssh(dry_run)
   os.system("echo '%s' |"
-            " parallel --colsep '	' %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{1}"
-            " --zone europe-west4-a -- {2}" % (tmux_cmd_string, dry_run_string, basename))
+            " parallel --colsep '	' --jobs %d %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{1}"
+            " --zone europe-west4-a -- {2}" % (tmux_cmd_string, num_tpus, dry_run_string, basename))
