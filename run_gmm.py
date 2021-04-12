@@ -17,9 +17,9 @@
 """
 import os
 
-import gmm_dist
+import sample_gmm
+import gmm_eval
 import gmm_models
-import metrics
 import plotting
 import train
 
@@ -135,7 +135,7 @@ def make_loss(model,
               batch_size=128):
 
   def sample_train_batch(key):
-    return gmm_dist.sample_batch_random_ks(
+    return sample_gmm.sample_batch_random_ks(
         key, model_name, batch_size, min_k, max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
@@ -163,14 +163,14 @@ def make_summarize(
     eval_batch_size=256):
 
   def sample_eval_batch(key):
-    return gmm_dist.sample_batch_random_ks(
+    return sample_gmm.sample_batch_random_ks(
         key, model_name, eval_batch_size, min_k, max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
   def sample_single_gmm(key, num_modes):
-    xs, cs, params = gmm_dist.sample_batch_fixed_ks(
+    xs, cs, params = sample_gmm.sample_batch_fixed_ks(
         key, model_name, jnp.array([num_modes]), max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
@@ -192,20 +192,30 @@ def make_summarize(
         params, xs[jnp.newaxis], jnp.array([num_modes]))
     return xs, cs, gmm_params, tfmr_cs, tfmr_gmm_params
 
-  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch)
-
   sample_and_classify_single_gmm = jax.jit(sample_and_classify_single_gmm)
 
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
     xs, cs, ks, _ = sample_eval_batch(subkey)
-    baseline_metrics = metrics.compute_masked_baseline_metrics(
+    em_metrics, srbf_metrics, agg_metrics = gmm_eval.compute_masked_baseline_metrics(
         xs, cs, ks, ks*data_points_per_mode)
-    for method_name, method_metrics in baseline_metrics.items():
-      for metric_name, metric_val in method_metrics.items():
-        writer.scalar("%s/%s" % (method_name, metric_name),
-                      metric_val, step=step)
-        print("%s %s: %0.3f" % (method_name, metric_name, metric_val))
+    # EM
+    writer.scalar("em/pairwise_acc", em_metrics[0], step=step)
+    print("em pairwise acc: %0.3f" % em_metrics[0])
+    writer.scalar("em/pairwise_f1", em_metrics[1], step=step)
+    print("em pairwise f1: %0.3f" % em_metrics[1])
+    writer.scalar("em/avg_ll", em_metrics[2], step=step)
+    print("em avg ll: %0.3f" % em_metrics[2])
+    # Spectral RBF
+    writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
+    print("spectral rbf pairwise acc: %0.3f" % srbf_metrics[0])
+    writer.scalar("spectral_rbf/pairwise_f1", srbf_metrics[1], step=step)
+    print("spectral rbf pairwise f1: %0.3f" % srbf_metrics[1])
+    # Agglomerative Clustering
+    writer.scalar("agglomerative/pairwise_acc", agg_metrics[0], step=step)
+    print("agglomerative pairwise acc: %0.3f" % agg_metrics[0])
+    writer.scalar("agglomerative/pairwise_f1", agg_metrics[1], step=step)
+    print("agglomerative pairwise f1: %0.3f" % agg_metrics[1])
 
   def plot_params(num_modes, num_data_points, writer, step, params, key):
     outs = sample_and_classify_single_gmm(key, params, num_modes)
@@ -283,17 +293,24 @@ def make_summarize(
     writer.image("no_structure", plotting.plot_to_numpy_image(plt), step=step)
     plt.close(fig)
 
+  def compute_metrics(key, params):
+    xs, cs, ks, _, tfmr_cs, tfmr_gmm_params  = sample_and_classify_eval_batch(key, params)
+    avg_acc, avg_f1, avg_log_marginal = gmm_eval.compute_metrics(
+        xs, tfmr_gmm_params, cs, tfmr_cs, ks*data_points_per_mode, ks)
+    return avg_acc, avg_f1, avg_log_marginal
+
+  compute_metrics = jax.jit(compute_metrics)
+
   def summarize(writer, step, params, key):
     k1, k2, k3 = jax.random.split(key, num=3)
-    _, cs, ks, _, tfmr_cs, _ = sample_and_classify_eval_batch(k1, params)
-    tfmr_metrics = metrics.compute_masked_metrics(
-        cs, tfmr_cs, ks, ks*data_points_per_mode,
-        metrics=["pairwise_accuracy", "pairwise_f1",
-                 "pairwise_macro_f1", "pairwise_micro_f1"])
-    for metric_name, metric_val in tfmr_metrics.items():
-      writer.scalar("transformer/%s" % metric_name,
-                    metric_val, step=step)
-      print("Transformer %s: %0.3f" % (metric_name, metric_val))
+    avg_acc, avg_f1, avg_log_marginal = compute_metrics(k1, params)
+    writer.scalar("transformer/pairwise_acc", avg_acc, step=step)
+    print("Transformer pairwise accuracy: %0.3f" % avg_acc)
+    writer.scalar("transformer/pairwise_f1", avg_f1, step=step)
+    print("Transformer pairwise f1: %0.3f" % avg_f1)
+    writer.scalar("transformer/avg_log_marginal", avg_log_marginal, step=step)
+    print("Transformer avg log marginal: %0.3f" % avg_log_marginal)
+
     if data_dim == 2:
       plot_params(min_k, min_k*data_points_per_mode, writer, step, params, k2)
       if FLAGS.plot_sklearn_comparison:

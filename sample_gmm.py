@@ -23,6 +23,9 @@ from jax import vmap
 import jax.numpy as jnp
 import jax.scipy as jscipy
 
+import tensorflow_probability as tfp
+tfd = tfp.substrates.jax.distributions
+
 def sample_spaced_means(key, num_means, covs, dist_mult, data_dim, max_rejections=1000):
 
   # The axes of an ellipsoid defined by x^TAx = 1 with A symmetric PSD
@@ -595,86 +598,3 @@ def sample_banana_mm(key, mus, scale, r, w_logits, num_samples):
   r_noise = scale*jax.random.normal(keys[3], shape=[num_samples])
   xs = x_mus + (jnp.stack([x_coord, y_coord]).T)*((r + r_noise)[:, jnp.newaxis])
   return xs, cs
-
-
-@partial(jax.jit)
-def log_joint(xs, cs, mus, scale, ws):
-  """Evaluates the log joint probability of a GMM.
-
-  The GMM is defined by the following sampling process:
-
-  c_i ~ Categorical(w) for i=1,...,N
-  x_i ~ Normal(mus[c_i], scale^2) for i=1,...,N
-
-  Args:
-    xs: A set of [N, D] values to compute the log probability of.
-    cs: A shape [N] integer vector, the cluster assignments for each x.
-    mus: A set of [K, D] mixture component means.
-    scale: A scalar float, the scale of the mixture components.
-    ws: A vector of shape [K], the mixture weights of the GMM. Need not be
-      normalized.
-
-  Returns:
-    A [N] float vector, the log probabilities of each X.
-  """
-  log_p_c = jax.vmap(util.categorical_logpmf, in_axes=(0, None))(cs, ws)
-  log_p_x = jnp.sum(
-      jscipy.stats.norm.logpdf(xs, loc=mus[cs], scale=scale), axis=1)
-  return log_p_c + log_p_x
-
-
-@partial(jax.jit)
-def log_joint_with_prior(xs, cs, mus, scale, ws, mu_prior_mean, mu_prior_scale,
-                         unused_w_prior_conc):
-  """Evaluates the log joint probability of a GMM with a prior on some of the parameters.
-
-  The GMM is defined by the following sampling process:
-
-  w ~ Dirichlet(w_prior_conc)
-  mu_i ~ Normal(mu_prior_mean, mu_prior_scale^2) for i=1,...,K
-  c_i ~ Categorical(w) for i=1,...,N
-  x_i ~ Normal(mus[c_i], scale^2) for i=1,...,N
-
-  Args:
-    xs: A set of [N, D] values to compute the log probability of.
-    cs: A shape [N] integer vector, the cluster assignments for each x.
-    mus: A set of [K, D] mixture component means.
-    scale: A scalar float, the scale of the mixture components.
-    ws: A vector of shape [K], the mixture weights of the GMM. Need not be
-      normalized.
-    mu_prior_mean: The prior mean of the mixture component means.
-    mu_prior_scale: The prior scale of the mixture component means.
-    unused_w_prior_conc: The concentration parameter for the Dirichlet prior on
-      w.
-
-  Returns:
-    A scalar float, the log probability of the data.
-  """
-  log_p = jnp.sum(log_joint(xs, cs, mus, scale, ws))
-  log_p_mu = jnp.sum(
-      jscipy.stats.norm.logpdf(mus, loc=mu_prior_mean, scale=mu_prior_scale))
-  log_p_w = 0.  # jnp.sum(scipy.stats.dirichlet.logpdf(ws, w_prior_conc))
-  return log_p + log_p_mu + log_p_w
-
-
-@partial(jax.jit)
-def marginal(x, mus, scale, ws):
-  """Computes the marginal probability of x under a GMM.
-
-  Args:
-    x: A shape [D] vector, the data point to compute p(x) for.
-    mus: A [K,D] matrix, the K D-dimensional mixture component means.
-    scale: The scale of the mixture components
-    ws: A shape [K] vector, the mixture weights.
-
-  Returns:
-    p(x), a float scalar.
-  """
-  cs = jnp.arange(mus.shape[0])[:, jnp.newaxis]
-  x = x[jnp.newaxis, :]
-  log_ps = jax.vmap(
-      log_joint, in_axes=(None, 0, None, None, None))(x, cs, mus, scale, ws)
-  return jnp.exp(jscipy.special.logsumexp(log_ps))
-
-
-batch_marginal = jax.jit(jax.vmap(marginal, in_axes=(0, None, None, None)))
