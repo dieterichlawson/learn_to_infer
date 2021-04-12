@@ -167,7 +167,7 @@ def parallel_train_loop(key,
 
   lr_fn = util.create_learning_rate_scheduler(base_learning_rate=lr)
 
-  @functools.partial(jax.pmap, axis_name="batch")
+  @functools.partial(jax.pmap, axis_name="batch", donate_argnums=(0,1))
   def train_step(optimizer, key):
     key, subkey = jax.random.split(key)
     loss_grad = jax.grad(loss_fn, argnums=0)(optimizer.target, subkey)
