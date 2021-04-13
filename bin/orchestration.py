@@ -42,8 +42,9 @@ def allow_ssh(dry_run):
 def create_and_init_tpus(basename, num_tpus, dry_run):
   create_tpus(basename, num_tpus, dry_run)
   if ensure_tpus_up(basename, num_tpus, dry_run):
-    print("Not initializing TPUs")
     initialize_tpus(basename, num_tpus, dry_run)
+  else:
+    print("Not initializing TPUs")
 
 def create_tpus(basename, num_tpus, dry_run):
   dry_run_string = "--dry-run" if dry_run else ""
