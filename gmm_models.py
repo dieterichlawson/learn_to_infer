@@ -358,6 +358,7 @@ class MeanScaleWeightInferenceMachine(object):
                num_decoders=6,
                qkv_dim=512,
                activation_fn=flax.nn.relu,
+               normalization="no_norm",
                weight_init=jax.nn.initializers.xavier_uniform()):
     """Creates the model.
 
@@ -383,7 +384,7 @@ class MeanScaleWeightInferenceMachine(object):
         max_input_length=max_num_data_points, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
-        activation_fn=activation_fn, weight_init=weight_init)
+        activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
 
   def init_params(self, key):
     """Initializes the parameters of the model using dummy data.

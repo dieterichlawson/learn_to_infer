@@ -26,6 +26,14 @@ import jax.numpy as jnp
 import jax.random
 
 
+def normalize(inputs, normalization_type):
+  if normalization_type == "no_norm":
+    return inputs
+  elif normalization_type == 'layer_norm':
+    return nn.LayerNorm(x, bias=True, scale=False)
+  elif normalization_type == 'batch_norm':
+    return inputs
+
 class TransformerEncoderLayer(nn.Module):
 
   def apply(self,
@@ -33,6 +41,7 @@ class TransformerEncoderLayer(nn.Module):
             mask,
             activation_fn=flax.nn.relu,
             num_heads=8,
+            normalization=None,
             weight_init=jax.nn.initializers.xavier_normal()):
     """Applies one transformer encoder layer.
 
@@ -57,6 +66,8 @@ class TransformerEncoderLayer(nn.Module):
         kernel_init=weight_init)
 
     attn_outs = inputs + attn_outs
+    
+    attn_outs = normalize(attn_outs, normalization)
 
     out1 = activation_fn(flax.nn.Dense(attn_outs,
                                        features=value_dim,
@@ -64,7 +75,9 @@ class TransformerEncoderLayer(nn.Module):
     out2 = flax.nn.Dense(out1,
                          features=value_dim,
                          kernel_init=weight_init)
-    return attn_outs + out2
+
+    outs = attn_outs + out2
+    return normalize(outs, normalization)
 
 
 class TransformerEncoderStack(nn.Module):
@@ -76,6 +89,7 @@ class TransformerEncoderStack(nn.Module):
             num_heads=8,
             value_dim=128,
             activation_fn=flax.nn.relu,
+            normalization=None,
             weight_init=jax.nn.initializers.xavier_normal()):
     """Applies a stack of transformer encoder layers.
 
@@ -98,6 +112,7 @@ class TransformerEncoderStack(nn.Module):
                                        mask,
                                        activation_fn=activation_fn,
                                        num_heads=num_heads,
+                                       normalization=normalization,
                                        weight_init=weight_init)
     return inputs
 
@@ -111,6 +126,7 @@ class TransformerDecoderLayer(nn.Module):
             encoder_mask,
             activation_fn=flax.nn.relu,
             num_heads=8,
+            normalization=None,
             weight_init=jax.nn.initializers.xavier_normal()):
     """Applies one transformer decoder layer.
 
@@ -138,10 +154,10 @@ class TransformerDecoderLayer(nn.Module):
         qkv_features=value_dim,
         kernel_init=weight_init)
 
-    target_inputs_out = target_inputs_attn + target_inputs
+    target_inputs_out = normalize(target_inputs_attn + target_inputs, normalization)
 
     enc_dec_attn_out = flax.nn.MultiHeadDotProductAttention(
-        inputs_q=target_inputs_attn,
+        inputs_q=target_inputs_out,
         inputs_kv=encoder_inputs,
         padding_mask=target_mask,
         key_padding_mask=encoder_mask,
@@ -149,7 +165,7 @@ class TransformerDecoderLayer(nn.Module):
         qkv_features=value_dim,
         kernel_init=weight_init)
 
-    enc_dec_attn_out += target_inputs_out
+    enc_dec_attn_out = normalize(target_inputs_out + enc_dec_attn_out, normalization)
 
     out_layer1 = activation_fn(flax.nn.Dense(enc_dec_attn_out,
                                              features=value_dim,
@@ -158,7 +174,7 @@ class TransformerDecoderLayer(nn.Module):
                                features=value_dim,
                                kernel_init=weight_init)
 
-    return out_layer2 + enc_dec_attn_out
+    return normalize(out_layer2 + enc_dec_attn_out, normalization)
 
 
 class TransformerDecoderStack(nn.Module):
@@ -172,6 +188,7 @@ class TransformerDecoderStack(nn.Module):
             num_decoders=6,
             num_heads=8,
             value_dim=128,
+            normalization=None,
             weight_init=jax.nn.initializers.xavier_normal()):
     """Applies a stack of transformer decoder layers.
 
@@ -202,6 +219,7 @@ class TransformerDecoderStack(nn.Module):
                                        encoder_mask,
                                        activation_fn=activation_fn,
                                        num_heads=num_heads,
+                                       normalization=normalization,
                                        weight_init=weight_init)
     return inputs
 
@@ -221,6 +239,7 @@ class EncoderDecoderTransformer(nn.Module):
             num_decoders=6,
             qkv_dim=512,
             activation_fn=flax.nn.relu,
+            normalization=None,
             weight_init=jax.nn.initializers.xavier_uniform()):
     """Applies Transformer model on the inputs.
 
@@ -256,6 +275,7 @@ class EncoderDecoderTransformer(nn.Module):
                                          num_encoders=num_encoders,
                                          num_heads=num_heads,
                                          value_dim=qkv_dim,
+                                         normalization=normalization,
                                          weight_init=weight_init)
     batch_size = inputs.shape[0]
     if targets is not None:
@@ -277,6 +297,7 @@ class EncoderDecoderTransformer(nn.Module):
                                             num_decoders=num_decoders,
                                             num_heads=num_heads,
                                             value_dim=qkv_dim,
+                                            normalization=normalization,
                                             weight_init=weight_init)
       # out is [batch_size, qkv_dim]
       out = activation_fn(

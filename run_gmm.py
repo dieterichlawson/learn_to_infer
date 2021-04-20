@@ -93,6 +93,9 @@ flags.DEFINE_boolean("debug_nans", False,
 flags.DEFINE_boolean("plot_sklearn_comparison", False,
                      "If true, generate the sklearn clustering comparison "
                      "plots.")
+flags.DEFINE_enum("normalization", 
+                  "no_norm", ["no_norm", "layer_norm", "batch_norm"],
+                  "Type of normalization to use")
 flags.DEFINE_string("tag", "",
                     "String to append to the logdir.")
 
@@ -107,7 +110,8 @@ def make_model(key,
                value_dim=128,
                data_points_per_mode=25,
                max_k=10,
-               data_dim=2):
+               data_dim=2,
+               normalization="no_norm"):
   class_dict = {
       #"mean": gmm_models.MeanInferenceMachine,
       #"mean_scale": gmm_models.MeanScaleInferenceMachine,
@@ -116,7 +120,8 @@ def make_model(key,
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k,
       max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
-      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim)
+      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
+      normalization=normalization)
   params = model.init_params(key)
 
   return model, params
@@ -333,12 +338,13 @@ def make_logdir(config):
       "_maxk_%d"
       "_dps_per_k_%d"
       "_cov_prior_%s"
-      "_cov_dof_%d" 
+      "_cov_dof_%d"
+      "_%s"
       "_tpu%s" % (
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
         config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof, config.tag)
+        config.cov_dof, config.normalization, config.tag)
       )
   return os.path.join(basedir, exp_dir)
 
