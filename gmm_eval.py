@@ -169,26 +169,27 @@ def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
   em_avg_f1 = em_f1_tot / batch_size
   em_avg_ll = em_ll_tot / batch_size
   
-  #Spectral RBF
-  srbf_acc_tot = 0.
-  srbf_f1_tot = 0.
-  for i in range(batch_size):
-    pred_cs = spectral_rbf_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
-    srbf_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
-    srbf_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
-  srbf_avg_acc = srbf_acc_tot / batch_size
-  srbf_avg_f1 = srbf_f1_tot / batch_size
+  ##Spectral RBF
+  #srbf_acc_tot = 0.
+  #srbf_f1_tot = 0.
+  #for i in range(batch_size):
+  #  pred_cs = spectral_rbf_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+  #  srbf_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #  srbf_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #srbf_avg_acc = srbf_acc_tot / batch_size
+  #srbf_avg_f1 = srbf_f1_tot / batch_size
 
-  #Agglomerative clustering
-  agg_acc_tot = 0.
-  agg_f1_tot = 0.
-  for i in range(batch_size):
-    pred_cs = agglomerative_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
-    agg_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
-    agg_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
-  agg_avg_acc = agg_acc_tot / batch_size
-  agg_avg_f1 = agg_f1_tot / batch_size
+  ##Agglomerative clustering
+  #agg_acc_tot = 0.
+  #agg_f1_tot = 0.
+  #for i in range(batch_size):
+  #  pred_cs = agglomerative_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+  #  agg_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #  agg_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #agg_avg_acc = agg_acc_tot / batch_size
+  #agg_avg_f1 = agg_f1_tot / batch_size
 
   return ((em_avg_acc, em_avg_f1, em_avg_ll), 
-          (srbf_avg_acc, srbf_avg_f1), 
-          (agg_avg_acc, agg_avg_f1))
+          (0.,0.), (0.,0.))
+          #(srbf_avg_acc, srbf_avg_f1), 
+          #(agg_avg_acc, agg_avg_f1))
