@@ -72,6 +72,20 @@ def initialize_tpus(basename, num_tpus, dry_run):
             " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
               num_tpus, dry_run_string, num_tpus, basename))
 
+def reinit_tpus(basename, tpu_nums, dry_run):
+  allow_ssh(dry_run)
+  dry_run_string = "--dry-run" if dry_run else ""
+  tpu_num_string = "\n".join([str(x) for x in tpu_nums])
+  print("Resetting TPUs")
+  os.system("echo '%s' | parallel %s --jobs %d "
+      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+      " -- \"tmux kill-server"
+      " && pip3 uninstall -r learn_to_infer/requirements.txt"
+      " && rm -r -f learn_to_infer"
+      " && git clone https://github.com/dieterichlawson/learn_to_infer.git"
+      " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
+        tpu_num_string, dry_run_string, len(tpu_nums), basename))
+
 def wait_till_tpus_up(basename, num_tpus, max_retries=3):
 
   def check_tpu(tpu_num):
@@ -105,10 +119,13 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
     return False
 
 def run_commands(basename, commands, dry_run):
+  run_commands_on_tpus(basename, commands, range(1, len(commands)+1), dry_run)
+
+def run_commands_on_tpus(basename, commands, tpu_nums, dry_run):
   num_tpus = len(commands)
   dry_run_string = "--dry-run" if dry_run else ""
   tmux_cmd = "%d	tmux new-session -d \"%s --tag=%d; read;\""
-  tmux_cmds = [tmux_cmd % (i+1, c, i+1) for i, c in enumerate(commands)]
+  tmux_cmds = [tmux_cmd % (i+1, c, i+1) for i, c in zip(tpu_nums, commands)]
   tmux_cmd_string = "\n".join(tmux_cmds)
   allow_ssh(dry_run)
   os.system("echo '%s' |"
