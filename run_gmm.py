@@ -202,7 +202,7 @@ def make_summarize(
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
     xs, cs, ks, _ = sample_eval_batch(subkey)
-    em_metrics, srbf_metrics, agg_metrics = gmm_eval.compute_masked_baseline_metrics(
+    em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
         xs, cs, ks, ks*data_points_per_mode)
     # EM
     writer.scalar("em/pairwise_acc", em_metrics[0], step=step)
@@ -211,16 +211,16 @@ def make_summarize(
     print("em pairwise f1: %0.3f" % em_metrics[1])
     writer.scalar("em/avg_ll", em_metrics[2], step=step)
     print("em avg ll: %0.3f" % em_metrics[2])
-    # Spectral RBF
-    writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
-    print("spectral rbf pairwise acc: %0.3f" % srbf_metrics[0])
-    writer.scalar("spectral_rbf/pairwise_f1", srbf_metrics[1], step=step)
-    print("spectral rbf pairwise f1: %0.3f" % srbf_metrics[1])
-    # Agglomerative Clustering
-    writer.scalar("agglomerative/pairwise_acc", agg_metrics[0], step=step)
-    print("agglomerative pairwise acc: %0.3f" % agg_metrics[0])
-    writer.scalar("agglomerative/pairwise_f1", agg_metrics[1], step=step)
-    print("agglomerative pairwise f1: %0.3f" % agg_metrics[1])
+    ## Spectral RBF
+    #writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
+    #print("spectral rbf pairwise acc: %0.3f" % srbf_metrics[0])
+    #writer.scalar("spectral_rbf/pairwise_f1", srbf_metrics[1], step=step)
+    #print("spectral rbf pairwise f1: %0.3f" % srbf_metrics[1])
+    ## Agglomerative Clustering
+    #writer.scalar("agglomerative/pairwise_acc", agg_metrics[0], step=step)
+    #print("agglomerative pairwise acc: %0.3f" % agg_metrics[0])
+    #writer.scalar("agglomerative/pairwise_f1", agg_metrics[1], step=step)
+    #print("agglomerative pairwise f1: %0.3f" % agg_metrics[1])
 
   def plot_params(num_modes, num_data_points, writer, step, params, key):
     outs = sample_and_classify_single_gmm(key, params, num_modes)
