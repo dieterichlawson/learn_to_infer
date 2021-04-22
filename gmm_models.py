@@ -27,6 +27,8 @@ import jax.numpy as jnp
 import jax.random
 import jax.scipy as jscipy
 
+import tensorflow_probability as tfp
+tfd = tfp.substrates.jax.distributions
 
 class MeanInferenceMachine(object):
   """Model which predicts cluster means from a batch of data."""
@@ -177,11 +179,14 @@ def unflatten_gmm_params(flat_params, original_dim):
     ordered as log_weights, means, flattened scales.
   original_dim: The original dimension of the data.
   """
-  log_weights = flat_params[:, 0]
-  mus = flat_params[:, 1:original_dim+1]
-  scales = vmap(unflatten_scale, in_axes=(0, None))(
-          flat_params[:, original_dim+1:], original_dim)
-  return mus, scales, log_weights
+  return vmap(unflatten_component_params, in_axes=(0,None))(flat_params, original_dim)
+
+def unflatten_component_params(flat_params, original_dim):
+  log_weight = flat_params[0]
+  mu = flat_params[1:original_dim+1]
+  scale = unflatten_scale(flat_params[original_dim+1:], original_dim)
+  return mu, scale, log_weight
+
 
 def standardize_data(data, num_data_points, max_num_data_points):
   """
@@ -210,6 +215,22 @@ def unstandardize_params(pred_mean, pred_scale, mean, std):
   unstd_scale = jnp.diag(std) @ pred_scale
   return unstd_mean, unstd_scale
 
+def kl_param_dist(flat_params_1, flat_params_2, original_dim):
+  mu_1, scale_1, log_weight_1 = unflatten_component_params(flat_params_1, original_dim)
+  dist_1 = tfd.MultivariateNormalFullCovariance(loc=mu_1, covariance_matrix=scale_1 @ scale_1.T)
+  mu_2, scale_2, log_weight_2 = unflatten_component_params(flat_params_2, original_dim)
+  dist_2 = tfd.MultivariateNormalFullCovariance(loc=mu_2, covariance_matrix=scale_2 @ scale_2.T)
+  kl = dist_1.kl_divergence(dist_2)
+  return kl + (log_weight_1 - log_weight_2)**2
+
+def symm_kl_param_dist(flat_params_1, flat_params_2, original_dim):
+  mu_1, scale_1, log_weight_1 = unflatten_component_params(flat_params_1, original_dim)
+  dist_1 = tfd.MultivariateNormalFullCovariance(loc=mu_1, covariance_matrix=scale_1 @ scale_1.T)
+  mu_2, scale_2, log_weight_2 = unflatten_component_params(flat_params_2, original_dim)
+  dist_2 = tfd.MultivariateNormalFullCovariance(loc=mu_2, covariance_matrix=scale_2 @ scale_2.T)
+  kl_1 = jnp.minimum(dist_1.kl_divergence(dist_2), 1e4)
+  kl_2 = jnp.minimum(dist_2.kl_divergence(dist_1), 1e4)
+  return 0.5*(kl_1 + kl_2) + (log_weight_1 - log_weight_2)**2
 
 class MeanScaleInferenceMachine(object):
 
@@ -346,7 +367,6 @@ class MeanScaleInferenceMachine(object):
     clusters = jnp.argmax(log_ps, axis=-2)
     return clusters, (means, covs)
 
-
 class MeanScaleWeightInferenceMachine(object):
 
   def __init__(self,
@@ -359,6 +379,7 @@ class MeanScaleWeightInferenceMachine(object):
                qkv_dim=512,
                activation_fn=flax.nn.relu,
                normalization="no_norm",
+               dist=symm_kl_param_dist,
                weight_init=jax.nn.initializers.xavier_uniform()):
     """Creates the model.
 
@@ -379,6 +400,10 @@ class MeanScaleWeightInferenceMachine(object):
     self.data_dim = data_dim
     self.max_k = max_k
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
+    if dist == symm_kl_param_dist or dist == kl_param_dist:
+      self.dist = lambda x,y: dist(x, y, data_dim)
+    else:
+      self.dist = dist
     self.tfmr = transformer.EncoderDecoderTransformer.partial(
         target_dim=target_dim,
         max_input_length=max_num_data_points, max_target_length=max_k,
@@ -429,7 +454,7 @@ class MeanScaleWeightInferenceMachine(object):
     true_means, true_scales, true_log_weights = true_params
     flat_true_params = vmap(flatten_gmm_params)(true_means, true_scales, true_log_weights)
     preds = self.tfmr.call(params, inputs, input_lengths, ks)
-    return self.tfmr.wasserstein_distance_loss(flat_true_params, ks, preds, key)
+    return self.tfmr.wasserstein_distance_loss(flat_true_params, ks, preds, self.dist, key)
 
   def predict(self, params, inputs, input_lengths, ks):
     """Predicts the cluster means for the given data sets.

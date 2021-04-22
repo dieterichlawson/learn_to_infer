@@ -24,7 +24,9 @@ from flax import nn
 import jax
 import jax.numpy as jnp
 import jax.random
-
+from jax import vmap
+import jax.experimental
+import jax.experimental.host_callback as hcb
 
 def normalize(inputs, normalization_type):
   if normalization_type == "no_norm":
@@ -336,6 +338,7 @@ class EncoderDecoderTransformer(nn.Module):
       targets,
       target_lengths,
       predictions,
+      dist,
       key):
     batch_size = predictions.shape[0]
     max_target_length = targets.shape[1]
@@ -343,12 +346,17 @@ class EncoderDecoderTransformer(nn.Module):
     ranges = jnp.tile(
         jnp.arange(max_target_length)[jnp.newaxis, :],
         [batch_size, 1])
-    weights = jnp.where(ranges < target_lengths[:, jnp.newaxis],
-                        jnp.zeros([batch_size, max_target_length]),
-                        jnp.full([batch_size, max_target_length], -jnp.inf))
+    log_weights = jnp.where(
+        ranges < target_lengths[:, jnp.newaxis],
+        jnp.zeros([batch_size, max_target_length]),
+        jnp.full([batch_size, max_target_length], -jnp.inf))
 
-    wdists, _ = jax.vmap(util.atomic_sinkhorn)(
-        predictions, weights, targets, weights,
+    pdist = vmap(vmap(dist, in_axes=(0, None)), in_axes=(None, 0))
+    # [batch_size, max_target_length, max_target_length]
+    Cs = vmap(pdist)(predictions, targets)
+    #hcb.id_print(Cs, what="C") 
+    wdists, _ = vmap(util.sinkhorn)(
+        Cs, log_weights, log_weights,
         jax.random.split(key, num=batch_size)
     )
     return wdists
