@@ -1,15 +1,3 @@
-import orchestration as orch
-import argparse
-
-parser = argparse.ArgumentParser(description='Run L2I commands.')
-
-parser.add_argument('--init_tpus', action="store_true",
-                    help='Start new TPUs for these commands')
-parser.add_argument('--dry_run', action="store_true",
-                    help='Do a dry run printing commands.')
-
-args = parser.parse_args()
-
 experiment_name = "lda_perp_exp"
 command = "python3 learn_to_infer/run_lda.py"
 
@@ -33,10 +21,3 @@ job_args = {
   "checkpoint_every": 2500,
   "logdir": "gs://l2i/" + experiment_name
 }
-
-commands = orch.make_commands(command, job_args)
-
-if args.init_tpus:
-  orch.initialize_tpus(experiment_name, len(commands), args.dry_run)
-
-orch.run_commands(experiment_name, commands, args.dry_run)

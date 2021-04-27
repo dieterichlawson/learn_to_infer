@@ -1,24 +1,24 @@
-experiment_name = "spacing_exp"
+experiment_name = "high_d_exp"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
 job_args = {
-  "model_name": "mean_scale_weight",
-  "data_dim": [2, 8, 16],
-  "num_encoders": 2,
+  "model_name": "mean",
+  "data_dim": [16, 32, 64],
+  "num_encoders": [2, 4, 6],
   "num_decoders": 2,
   "num_heads": 16,
   "key_dim": 32,
   "value_dim_per_head": 32,
-  "k": [2, 4, 8, 16],
-  "data_points_per_mode": 50,
-  "cov_prior": "inv_wishart",
-  "dist_multiplier": [.68, .95, .99],
-  "batch_size": 64,
+  "k": [2, 3],
+  "data_points_per_mode": 256,
+  "dist_multiplier": .68,
+  "batch_size": 128,
   "eval_batch_size": 256,
   "lr": 1e-3,
-  "checkpoint_every": 2500,
+  "checkpoint_every": 10000,
   "summarize_every": 2500,
   "num_steps": int(1e8),
+  "normalization": "layer_norm",
   "logdir": "gs://l2i/%s" % experiment_name
 }
