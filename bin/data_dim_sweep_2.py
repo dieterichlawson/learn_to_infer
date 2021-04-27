@@ -18,33 +18,39 @@ args = parser.parse_args()
 if args.reinit_tpus is not None:
   args.reinit_tpus = [int(x) for x in args.reinit_tpus.split(",")]
 
-experiment_name = "k_sweep_exp"
+experiment_name = "data_dim_exp_2"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
-job_args = {
+defaults = {
   "model_name": "mean_scale_weight",
-  "data_dim": 2,
-  "num_encoders": [2,4,6],
-  "num_decoders": 2,
+  "num_encoders": 4,
+  "num_decoders": 4,
   "num_heads": 16,
   "key_dim": 32,
   "value_dim_per_head": 32,
-  "k": [2, 4, 6, 10, 32],
-  "data_points_per_mode": 50,
+  "k": 2,
   "cov_prior": "inv_wishart",
-  "cov_dof": 16,
   "dist_multiplier": .68,
-  "batch_size": 128,
+  "batch_size": 64,
   "eval_batch_size": 256,
   "lr": 1e-3,
   "checkpoint_every": 10000,
   "summarize_every": 2500,
-  "num_steps": int(1e8),
   "normalization": "layer_norm",
+  "num_steps": int(1e8),
   "logdir": "gs://l2i/%s" % experiment_name
 }
-commands = orch.make_commands(command, job_args)
+
+hparams = [
+    {"data_dim": 2, "cov_dof": 8, "data_points_per_mode": 50},
+    {"data_dim": 4, "cov_dof": 12, "data_points_per_mode": [160, 80, 40]},
+    {"data_dim": 8, "cov_dof": 24, "data_points_per_mode": [600, 300, 150]},
+    {"data_dim": 16, "cov_dof": 48, "data_points_per_mode": [2250, 1125, 560],
+      "batch_size": 8, "eval_batch_size":16},
+]
+
+commands = orch.make_commands(command, *hparams, defaults=defaults)
 
 if args.reinit_tpus is not None and len(args.reinit_tpus) > 0:
   filtered_cmds = [commands[i-1] for i in args.reinit_tpus]
