@@ -40,6 +40,7 @@ class MeanInferenceMachine(object):
                num_decoders=6,
                qkv_dim=512,
                activation_fn=flax.nn.relu,
+               normalization="no_norm",
                weight_init=jax.nn.initializers.xavier_uniform()):
     """Creates the model.
 
@@ -64,6 +65,7 @@ class MeanInferenceMachine(object):
         max_input_length=max_num_data_points, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
+        normalization=normalization,
         activation_fn=activation_fn, weight_init=weight_init)
 
   def init_params(self, key):
@@ -104,8 +106,8 @@ class MeanInferenceMachine(object):
       of mus, a tensor of shape [batch_size].
     """
     true_means, _, _ = true_params
-    return self.tfmr.wasserstein_distance_loss(
-        params, inputs, input_lengths, true_means, ks, key)
+    preds = self.tfmr.call(params, inputs, input_lengths, ks)
+    return self.tfmr.wasserstein_distance_loss(true_means, ks, preds, key)
 
   def predict(self, params, inputs, input_lengths, ks):
     """Predicts the cluster means for the given data sets.
