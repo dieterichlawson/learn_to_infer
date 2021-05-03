@@ -224,6 +224,111 @@ class TransformerDecoderStack(nn.Module):
     return inputs
 
 
+class UnconditionalEncoderDecoderTransformer(nn.Module):
+
+  def apply(self,
+            inputs,
+            input_lengths,
+            target_lengths,
+            targets=None,
+            target_dim=32,
+            max_input_length=100,
+            max_target_length=100,
+            num_heads=8,
+            num_encoders=6,
+            num_decoders=6,
+            qkv_dim=512,
+            activation_fn=flax.nn.relu,
+            normalization=None,
+            weight_init=jax.nn.initializers.xavier_uniform()):
+    """Applies Transformer model on the inputs.
+
+    Args:
+      inputs: input data, [batch_size, max_num_data_points, data_dim].
+      input_lengths: A [batch_size] vector containing the number of samples
+        in each batch element.
+      target_lengths: A [batch_size] vector containing the length of each
+        target sequence.
+      targets: The outputs to be produced by the transformer. Supplied only
+        during training. If None, then the transformer's own outputs are fed
+        back in.
+      target_dim: The length of each output vector.
+      max_input_length: An int at least as large as the largest element of
+        num_data_points, used for determining output shapes.
+      max_target_length: An int at least as large as the largest element of
+        target_lengths, used for determining output shapes.
+      num_heads: The number of heads for the self attention.
+      num_encoders: The number of transformer encoder layers.
+      num_decoders: The number of transformer decoder layers.
+      qkv_dim: The dimension of the query/key/value.
+      activation_fn: The activation function to use, defaults to relu.
+      weight_init: An initializer for the encoder weights.
+    Returns:
+      outs: The transformer output, a tensor of shape
+        [batch_size, max_target_length, target_dim].
+    """
+    batch_size = inputs.shape[0]
+    input_mask = util.make_mask(input_lengths, max_input_length)
+
+    encoder_hs = TransformerEncoderStack(inputs,
+                                         input_mask,
+                                         num_encoders=num_encoders,
+                                         num_heads=num_heads,
+                                         value_dim=qkv_dim,
+                                         normalization=normalization,
+                                         weight_init=weight_init)
+    # average over data dimension, resulting in [batch_size, data_dim]
+    encoder_out = jnp.mean(encoder_hs, axis=1)
+
+    decoder_out = flax.nn.Dense(encoder_out, features=max_target_length*64, 
+        kernel_init=weight_init)
+
+    for i in range(num_decoders):
+      layer_out = activation_fn(flax.nn.Dense(decoder_out,
+                                       features=max_target_length*64,
+                                       kernel_init=weight_init))
+      layer_out = normalize(layer_out, normalization)
+
+      layer_out = flax.nn.Dense(layer_out,
+                                features=max_target_length*64,
+                                kernel_init=weight_init)
+      layer_out = activation_fn(layer_out)
+      decoder_out = normalize(layer_out + decoder_out, normalization)
+
+
+    # dense layer to arrive at [batch_size, target_length, target_dim]
+    out = flax.nn.Dense(
+        decoder_out,
+        features=target_dim*max_target_length,
+        kernel_init=weight_init)
+    out = jnp.reshape(out, [batch_size, max_target_length, target_dim])
+
+    return out
+
+  @classmethod
+  def wasserstein_distance_loss(
+      cls,
+      targets,
+      target_lengths,
+      predictions,
+      key):
+    batch_size = predictions.shape[0]
+    max_target_length = targets.shape[1]
+    # [batch_size, max_target_length, target_dim]
+    ranges = jnp.tile(
+        jnp.arange(max_target_length)[jnp.newaxis, :],
+        [batch_size, 1])
+    weights = jnp.where(ranges < target_lengths[:, jnp.newaxis],
+                        jnp.zeros([batch_size, max_target_length]),
+                        jnp.full([batch_size, max_target_length], -jnp.inf))
+
+    wdists, _ = jax.vmap(util.atomic_sinkhorn)(
+        predictions, weights, targets, weights,
+        jax.random.split(key, num=batch_size)
+    )
+    return wdists
+
+
 class EncoderDecoderTransformer(nn.Module):
 
   def apply(self,

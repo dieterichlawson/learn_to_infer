@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 
 flags.DEFINE_enum("model_name", "mean_scale_weight",
                   #["mean", "mean_scale", "mean_scale_weight"],
-                  ["mean_scale_weight", "mean"],
+                  ["mean_scale_weight", "mean", "no_decoder"],
                   "Model to run")
 flags.DEFINE_integer("num_encoders", 6,
                      "Number of encoder modules in the transformer.")
@@ -101,6 +101,12 @@ flags.DEFINE_string("tag", "",
 
 FLAGS = flags.FLAGS
 
+sampling_types = {
+ "mean": "mean",
+ "mean_scale": "mean_scale",
+ "mean_scale_weight": "mean_scale_weight",
+ "no_decoder": "mean_scale_weight"
+}
 
 def make_model(key,
                model_name="mean",
@@ -115,7 +121,8 @@ def make_model(key,
   class_dict = {
       "mean": gmm_models.MeanInferenceMachine,
       #"mean_scale": gmm_models.MeanScaleInferenceMachine,
-      "mean_scale_weight": gmm_models.MeanScaleWeightInferenceMachine}
+      "mean_scale_weight": gmm_models.MeanScaleWeightInferenceMachine,
+      "no_decoder": gmm_models.NoDecoderInferenceMachine}
 
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k,
@@ -141,7 +148,7 @@ def make_loss(model,
 
   def sample_train_batch(key):
     return sample_gmm.sample_batch_random_ks(
-        key, model_name, batch_size, min_k, max_k, data_points_per_mode,
+        key, sampling_types[model_name], batch_size, min_k, max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   def loss(params, key):
@@ -169,14 +176,14 @@ def make_summarize(
 
   def sample_eval_batch(key):
     return sample_gmm.sample_batch_random_ks(
-        key, model_name, eval_batch_size, min_k, max_k, data_points_per_mode,
+        key, sampling_types[model_name], eval_batch_size, min_k, max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
   def sample_single_gmm(key, num_modes):
     xs, cs, params = sample_gmm.sample_batch_fixed_ks(
-        key, model_name, jnp.array([num_modes]), max_k, data_points_per_mode,
+        key, sampling_types[model_name], jnp.array([num_modes]), max_k, data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
     return xs[0], cs[0], (params[0][0], params[1][0], params[2][0])
