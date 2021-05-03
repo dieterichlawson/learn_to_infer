@@ -27,6 +27,7 @@ from jax import custom_vjp
 
 from tensorflow.io import gfile
 
+import jax.experimental.host_callback as hcb
 
 def create_learning_rate_scheduler(
     factors="constant * linear_warmup * rsqrt_decay * rsqrt_hidden_size",
@@ -236,6 +237,7 @@ def fixed_point(f, a, x_init):
   """
   def cond_fun(carry):
     x_prev, x = carry
+    #hcb.id_print(x)
     return jnp.logical_not(jnp.allclose(x_prev, x, rtol=1e-4, atol=1e-4))
 
   def body_fun(carry):
@@ -367,7 +369,7 @@ def sinkhorn(C, log_w_p, log_w_q, key, alpha=0.01):
   return cost, log_pi
 
 
-def atomic_sinkhorn(p_locs, log_w_p, q_locs, log_w_q, key, alpha=0.01):
+def l2_atomic_sinkhorn(p_locs, log_w_p, q_locs, log_w_q, key, alpha=0.01):
   """Solves an optimal transport problem between two atomic measures.
 
   p and q are assumed to be weighted atomic measures. The weights must

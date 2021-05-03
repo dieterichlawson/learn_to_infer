@@ -116,7 +116,7 @@ class LDATopicWordInferenceMachine(nn.Module):
         params, documents, log_topic_params=log_topic_params)
 
     wasserstein_dist, _ = jax.vmap(
-        util.atomic_sinkhorn, in_axes=(0, None, 0, None, 0))(
+        util.l2_atomic_sinkhorn, in_axes=(0, None, 0, None, 0))(
             log_topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
             pred_log_topic_params, jnp.zeros(num_topics) - jnp.log(num_topics),
             jax.random.split(key, num=batch_size))
