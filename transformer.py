@@ -32,7 +32,7 @@ def normalize(inputs, normalization_type):
   if normalization_type == "no_norm":
     return inputs
   elif normalization_type == 'layer_norm':
-    return nn.LayerNorm(x, bias=True, scale=False)
+    return nn.LayerNorm(inputs, bias=True, scale=False)
   elif normalization_type == 'batch_norm':
     return inputs
 

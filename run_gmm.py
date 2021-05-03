@@ -56,7 +56,9 @@ flags.DEFINE_integer("k", None,
 flags.DEFINE_integer("min_k", 2,
                      "The minimum number of modes in the data.")
 flags.DEFINE_integer("max_k", 10,
-                     "The maximum number of modes in the data.")
+                     "the maximum number of modes in the data.")
+flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
+                  "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
                      "Number of data points to include per mode in the data.")
 flags.DEFINE_integer("cov_dof", None,
@@ -118,7 +120,8 @@ def make_model(key,
                data_points_per_mode=25,
                max_k=10,
                data_dim=2,
-               normalization="no_norm"):
+               normalization="no_norm",
+               dist="l2"):
   class_dict = {
       "mean": gmm_models.OriginalMeanInferenceMachine,
       #"mean_scale": gmm_models.MeanScaleInferenceMachine,
@@ -131,7 +134,7 @@ def make_model(key,
       data_dim=data_dim, max_k=max_k,
       max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
-      normalization=normalization)
+      normalization=normalization, dist=dist)
   params = model.init_params(key)
 
   return model, params
@@ -339,6 +342,7 @@ def make_summarize(
 def make_logdir(config):
   basedir = config.logdir
   exp_dir = (
+      "%s"
       "nheads_%d"
       "_nenc_%d"
       "_ndec_%d"
@@ -350,11 +354,13 @@ def make_logdir(config):
       "_cov_prior_%s"
       "_cov_dof_%d"
       "_%s"
+      "_dist_%s"
       "_tpu%s" % (
+        config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
         config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof, config.normalization, config.tag)
+        config.cov_dof, config.normalization, config.dist, config.tag)
       )
   return os.path.join(basedir, exp_dir)
 
@@ -393,7 +399,9 @@ def main(unused_argv):
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim)
+      data_dim=FLAGS.data_dim, 
+      normalization=FLAGS.normalization,
+      dist=FLAGS.dist)
   loss_fn = make_loss(
       model,
       model_name=FLAGS.model_name,

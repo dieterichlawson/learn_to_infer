@@ -89,6 +89,12 @@ def symm_kl_param_dist(flat_params_1, flat_params_2, original_dim):
 
 l2_dist = lambda x,y: jnp.linalg.norm(x-y)
 
+NAMED_DIST_FNS = {
+    "l2": l2_dist,
+    "kl": kl_param_dist,
+    "symm_kl": symm_kl_param_dist
+}
+
 class GMMInferenceMachine(object):
 
   def __init__(self,
@@ -96,31 +102,28 @@ class GMMInferenceMachine(object):
                data_dim=2,
                max_k=2,
                max_num_data_points=25,
-               dist=symm_kl_param_dist,
+               dist="symm_kl",
                entropy_alpha=0.01):
     """Creates the model.
 
     Args:
+      model: The model which accepts data and produces parameters.
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
       max_num_data_points: The maximum number of data points that could be
         fed in at one time.
-      num_heads: The number of heads to use in the transformer.
-      num_encoders: The number of encoder layers to use in the transformer.
-      num_decoders: The number of decoder layers to use in the transformer.
-      qkv_dim: The dimensions of the queries, keys, and values in the
-        transformer.
-      activation_fn: The activation function to use for hidden layers.
-      weight_init: The weight initializer.
+      dist: The name of the distance function to use in computing the loss, selected from the 
+        keys of NAMED_DIST_FNS.
+      entropy_alpha: The entropy regularization weight used in computing the loss.
     """
     self.model = model
     self.max_num_data_points = max_num_data_points
     self.data_dim = data_dim
     self.max_k = max_k
-    if dist == symm_kl_param_dist or dist == kl_param_dist:
-      self.dist = lambda x,y: dist(x, y, data_dim)
+    if dist == "symm_kl" or dist == "kl":
+      self.dist = lambda x,y: NAMED_DIST_FNS[dist](x, y, data_dim)
     else:
-      self.dist = dist
+      self.dist = NAMED_DIST_FNS[dist]
     self.entropy_alpha = entropy_alpha
 
 
@@ -208,25 +211,21 @@ class MeanInferenceMachine(GMMInferenceMachine):
                data_dim=2,
                max_k=2,
                max_num_data_points=25,
-               dist=l2_dist,
+               dist=None,
                entropy_alpha=0.01):
     """Creates the model.
 
     Args:
+      model: The model which accepts data and produces parameters.
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
       max_num_data_points: The maximum number of data points that could be
         fed in at one time.
-      num_heads: The number of heads to use in the transformer.
-      num_encoders: The number of encoder layers to use in the transformer.
-      num_decoders: The number of decoder layers to use in the transformer.
-      qkv_dim: The dimensions of the queries, keys, and values in the
-        transformer.
-      activation_fn: The activation function to use for hidden layers.
-      weight_init: The weight initializer.
+      dist: Ignored, must be l2_dist for this model.
+      entropy_alpha: The entropy regularization weight used in computing the loss.
     """
     super().__init__(model, data_dim=data_dim, max_k=max_k, 
-        max_num_data_points=max_num_data_points, dist=dist,
+        max_num_data_points=max_num_data_points, dist="l2",
         entropy_alpha=entropy_alpha)
 
   def loss(self, params, inputs, input_lengths, true_params, ks, key):
@@ -311,7 +310,7 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
                qkv_dim=512,
                activation_fn=flax.nn.relu,
                normalization="no_norm",
-               dist=l2_dist,
+               dist=None,
                weight_init=jax.nn.initializers.xavier_uniform(),
                entropy_alpha=0.01):
     """Creates the model.
@@ -327,7 +326,10 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
       qkv_dim: The dimensions of the queries, keys, and values in the
         transformer.
       activation_fn: The activation function to use for hidden layers.
+      normalization: The type of normalization to use, either layernorm or no_norm.
+      dist: Ignored, must be l2_dist for this model.
       weight_init: The weight initializer.
+      entropy_alpha: The weight of the entropy regularization in the loss.
     """
     model = transformer.EncoderDecoderTransformer.partial(
         target_dim=data_dim,
@@ -341,7 +343,7 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
                data_dim=data_dim,
                max_k=max_k,
                max_num_data_points=max_num_data_points,
-               dist=dist,
+               dist="l2_dist",
                entropy_alpha=entropy_alpha)
 
 class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
@@ -357,7 +359,7 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
                qkv_dim=512,
                activation_fn=flax.nn.relu,
                normalization="no_norm",
-               dist=l2_dist,
+               dist=None,
                weight_init=jax.nn.initializers.xavier_uniform(),
                entropy_alpha=0.01):
     """Creates the model.
@@ -373,7 +375,10 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
       qkv_dim: The dimensions of the queries, keys, and values in the
         transformer.
       activation_fn: The activation function to use for hidden layers.
+      normalization: The type of normalization to use, either layernorm or no_norm.
+      dist: Ignored, must be l2_dist for this model.
       weight_init: The weight initializer.
+      entropy_alpha: The weight of the entropy regularization in the loss.
     """
     model = transformer.UnconditionalEncoderDecoderTransformer.partial(
         target_dim=data_dim,
@@ -387,60 +392,10 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
                data_dim=data_dim,
                max_k=max_k,
                max_num_data_points=max_num_data_points,
-               dist=dist,
+               dist="l2",
                entropy_alpha=entropy_alpha)
 
-class MeanScaleWeightInferenceMachine(object):
-
-  def __init__(self,
-               model,
-               data_dim=2,
-               max_k=2,
-               max_num_data_points=25,
-               dist=symm_kl_param_dist,
-               entropy_alpha=0.01):
-    """Creates the model.
-
-    Args:
-      data_dim: The dimensionality of the data points to be fed in.
-      max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
-      num_heads: The number of heads to use in the transformer.
-      num_encoders: The number of encoder layers to use in the transformer.
-      num_decoders: The number of decoder layers to use in the transformer.
-      qkv_dim: The dimensions of the queries, keys, and values in the
-        transformer.
-      activation_fn: The activation function to use for hidden layers.
-      weight_init: The weight initializer.
-    """
-    self.model = model
-    self.max_num_data_points = max_num_data_points
-    self.data_dim = data_dim
-    self.max_k = max_k
-    if dist == symm_kl_param_dist or dist == kl_param_dist:
-      self.dist = lambda x,y: dist(x, y, data_dim)
-    else:
-      self.dist = dist
-    self.entropy_alpha = entropy_alpha
-
-
-  def init_params(self, key):
-    """Initializes the parameters of the model using dummy data.
-
-    Args:
-      key: A JAX PRNG key
-    Returns:
-      params: The parameters of the model.
-    """
-    key, subkey = jax.random.split(key)
-    batch_size = 1
-    inputs = jax.random.normal(
-        subkey, [batch_size, self.max_num_data_points, self.data_dim])
-    input_lengths = jnp.full([batch_size], self.max_num_data_points)
-    ks = jnp.full([batch_size], self.max_k)
-    _, params = self.model.init(key, inputs, input_lengths, ks)
-    return params
+class MeanScaleWeightInferenceMachine(GMMInferenceMachine):
 
   def loss(self, params, inputs, input_lengths, true_params, ks, key):
     """Computes the wasserstein loss for this model.
@@ -546,7 +501,7 @@ class MSWOriginal(MeanScaleWeightInferenceMachine):
                qkv_dim=512,
                activation_fn=flax.nn.relu,
                normalization="no_norm",
-               dist=l2_dist,
+               dist="l2",
                weight_init=jax.nn.initializers.xavier_uniform(),
                entropy_alpha=0.01):
     """The original MSW Inference machine which feeds back predictions while decoding.
@@ -593,7 +548,7 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
                qkv_dim=512,
                activation_fn=flax.nn.relu,
                normalization="no_norm",
-               dist=l2_dist,
+               dist="l2",
                weight_init=jax.nn.initializers.xavier_uniform(),
                entropy_alpha=0.01):
     """Creates the model.
