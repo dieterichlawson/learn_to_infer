@@ -390,6 +390,66 @@ def l2_atomic_sinkhorn(p_locs, log_w_p, q_locs, log_w_q, key, alpha=0.01):
   C = vmap(vmap(l2_dist, in_axes=(0, None)), in_axes=(None, 0))(q_locs, p_locs)
   return sinkhorn(C, log_w_p, log_w_q, key, alpha=alpha)
 
+def masked_sinkhorn(C, log_w_p, log_w_q, length, max_length, key, alpha=0.01):
+  """Computes the optimal transport distance between two masked atomic measures.
+
+  The mask is used to give some atoms zero weight so they are not considered in the problem.
+  The weights in log_w_p and log_w_q that are in indices after length (i.e. log_w_p[length:])
+  will be set to negative infinity, and the remaining weights will be renormalized so the 
+  whole vector sums to one.
+
+  Args:
+    C: The cost matrix, C_ij contains the cost of moving mass from the ith
+      atom of p to the jth atom of q.
+    log_w_p: The unmasked log weights of the atoms of p, a vector of shape [max_length].
+    log_w_q: The unmasked log weights of the atoms of q, a vector of shape [max_length.
+    length: The extent of the unmasked weights in log_w_p and log_w_q.
+    max_length: The total number of weights, both masked and unmasked.
+    key: A JAX PRNG key.
+    alpha: The entropy regularizer weight.
+  Returns:
+    cost: The optimal cost
+    log_pi: The log of the transport plan.
+  """
+  # Construct the weights for an optimal transport problem between two empirical 
+  # distributions with max_length atoms such that atoms numbered greater than length
+  # have log weight of -infinity (weight zero).
+
+  def mask_and_renormalize(x, length, max_length):
+    x = jnp.where(
+        jnp.arange(max_length) < length,
+        x, jnp.full([max_length], -jnp.inf))
+    return x - jscipy.special.logsumexp(x)
+
+  log_w_p = mask_and_renormalize(log_w_p, length, max_length)
+  log_w_q = mask_and_renormalize(log_w_q, length, max_length)
+  return sinkhorn(C, log_w_p, log_w_q, key, alpha=alpha)
+   
+
+def masked_sinkhorn_with_dist(
+    p_locs, log_w_p, q_locs, log_w_q, 
+    dist, length, max_length, key, alpha=0.01):
+  """Computes the OT distance between two masked atomic measures using 'dist' to compare atoms.
+  Args:
+    p_locs: The locations of the atoms of p, a tensor of shape [max_length, data_dim].
+    log_w_p: The unmasked log weights of the atoms of p, a tensor of shape [max_length].
+    q_locs: The locations of the atoms of q, a tensor of shape [max_length, data_dim].
+    log_w_q: The unmasked log weights of the atoms of q, a tensor of shape [max_length].
+    dist: The distance measure to use to compare the atom locations of p and q. Should accept
+      two vectors of shape [data_dim] and return a scalar.
+    length: The number of unmasked atoms, a scalar less than max_length.
+    max_length: The total number of atoms, masked and unmasked.
+    key: A JAX PRNG key.
+    alpha: The entropy regularizer weight.
+  Returns: 
+    cost: The optimal cost
+    log_pi: The log of the transport plan.
+  """
+  pdist = vmap(vmap(dist, in_axes=(0, None)), in_axes=(None, 0))
+  # [max_target_length, max_target_length]
+  C = pdist(p_locs, q_locs)
+  return masked_sinkhorn(C, log_w_p, log_w_q, length, max_length, key, alpha=alpha)
+
 
 def shift_right(x):
   """Shift the input to the right by padding on axis -2."""

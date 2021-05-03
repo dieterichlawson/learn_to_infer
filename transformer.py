@@ -307,29 +307,6 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
 
     return out
 
-  @classmethod
-  def wasserstein_distance_loss(
-      cls,
-      targets,
-      target_lengths,
-      predictions,
-      key):
-    batch_size = predictions.shape[0]
-    max_target_length = targets.shape[1]
-    # [batch_size, max_target_length, target_dim]
-    ranges = jnp.tile(
-        jnp.arange(max_target_length)[jnp.newaxis, :],
-        [batch_size, 1])
-    weights = jnp.where(ranges < target_lengths[:, jnp.newaxis],
-                        jnp.zeros([batch_size, max_target_length]),
-                        jnp.full([batch_size, max_target_length], -jnp.inf))
-
-    wdists, _ = jax.vmap(util.atomic_sinkhorn)(
-        predictions, weights, targets, weights,
-        jax.random.split(key, num=batch_size)
-    )
-    return wdists
-
 
 class EncoderDecoderTransformer(nn.Module):
 
@@ -436,32 +413,3 @@ class EncoderDecoderTransformer(nn.Module):
     # outs is currently [max_target_length, batch_size, target_dim],
     # transpose to put the batch dimension first.
     return jnp.transpose(outs, axes=(1, 0, 2))
-
-  @classmethod
-  def wasserstein_distance_loss(
-      cls,
-      targets,
-      target_lengths,
-      predictions,
-      dist,
-      key):
-    batch_size = predictions.shape[0]
-    max_target_length = targets.shape[1]
-    # [batch_size, max_target_length, target_dim]
-    ranges = jnp.tile(
-        jnp.arange(max_target_length)[jnp.newaxis, :],
-        [batch_size, 1])
-    log_weights = jnp.where(
-        ranges < target_lengths[:, jnp.newaxis],
-        jnp.zeros([batch_size, max_target_length]),
-        jnp.full([batch_size, max_target_length], -jnp.inf))
-
-    pdist = vmap(vmap(dist, in_axes=(0, None)), in_axes=(None, 0))
-    # [batch_size, max_target_length, max_target_length]
-    Cs = vmap(pdist)(predictions, targets)
-    #hcb.id_print(Cs, what="C") 
-    wdists, _ = vmap(util.sinkhorn)(
-        Cs, log_weights, log_weights,
-        jax.random.split(key, num=batch_size)
-    )
-    return wdists

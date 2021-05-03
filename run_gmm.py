@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 
 flags.DEFINE_enum("model_name", "mean_scale_weight",
                   #["mean", "mean_scale", "mean_scale_weight"],
-                  ["mean_scale_weight", "mean", "no_decoder"],
+                  ["mean_scale_weight", "mean", "msw_unconditional", "mean_unconditional"],
                   "Model to run")
 flags.DEFINE_integer("num_encoders", 6,
                      "Number of encoder modules in the transformer.")
@@ -103,9 +103,10 @@ FLAGS = flags.FLAGS
 
 sampling_types = {
  "mean": "mean",
+ "mean_unconditional": "mean",
  "mean_scale": "mean_scale",
  "mean_scale_weight": "mean_scale_weight",
- "no_decoder": "mean_scale_weight"
+ "msw_unconditional": "mean_scale_weight"
 }
 
 def make_model(key,
@@ -119,10 +120,12 @@ def make_model(key,
                data_dim=2,
                normalization="no_norm"):
   class_dict = {
-      "mean": gmm_models.MeanInferenceMachine,
+      "mean": gmm_models.OriginalMeanInferenceMachine,
       #"mean_scale": gmm_models.MeanScaleInferenceMachine,
-      "mean_scale_weight": gmm_models.MeanScaleWeightInferenceMachine,
-      "no_decoder": gmm_models.NoDecoderInferenceMachine}
+      "mean_scale_weight": gmm_models.MSWOriginal,
+      "msw_unconditional": gmm_models.MSWUnconditional,
+      "mean_unconditional": gmm_models.UnconditionalMeanInferenceMachine
+  }
 
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k,
