@@ -206,6 +206,7 @@ def parallel_train_loop(key,
     
     if t % expensive_summarize_every == 0:
       key, subkey = jax.random.split(jax_utils.unreplicate(repl_key))
+      optimizer = jax_utils.unreplicate(repl_optimizer)
       summarize_fn(sw, t, optimizer.target, subkey)
 
     if t % summarize_every == 0:
