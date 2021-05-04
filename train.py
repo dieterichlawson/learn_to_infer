@@ -47,9 +47,11 @@ def train_loop(
     loss_fn,
     parallel=True,
     summarize_fn=default_summarize,
+    expensive_summarize_fn=default_summarize,
     lr=1e-4,
     num_steps=int(1e5),
     summarize_every=100,
+    expensive_summarize_every=1000,
     checkpoint_every=5000,
     clobber_checkpoint=False,
     logdir="/tmp/lda_inference"):
@@ -67,9 +69,11 @@ def train_loop(
   train_fn(
       key, init_params, loss_fn,
       summarize_fn=summarize_fn,
+      expensive_summarize_fn=expensive_summarize_fn,
       lr=lr,
       num_steps=num_steps,
       summarize_every=summarize_every,
+      expensive_summarize_every=expensive_summarize_every,
       checkpoint_every=checkpoint_every,
       clobber_checkpoint=clobber_checkpoint,
       logdir=logdir)
@@ -80,9 +84,11 @@ def local_train_loop(
     init_params,
     loss_fn,
     summarize_fn=default_summarize,
+    expensive_summarize_fn=default_summarize,
     lr=1e-4,
     num_steps=int(1e5),
     summarize_every=100,
+    expensive_summarize_every=1000,
     checkpoint_every=5000,
     clobber_checkpoint=False,
     logdir="/tmp/lda_inference"):
@@ -128,11 +134,17 @@ def local_train_loop(
       sys.stdout.flush()
       sys.exit(1)
     optimizer = new_optimizer
+   
+    if t % expensive_summarize_every == 0:
+      key, subkey = jax.random.split(key)
+      expensive_summarize_fn(sw, t, optimizer.target, subkey)
+    
     if t % summarize_every == 0:
       key, subkey = jax.random.split(key)
       print("Step %d loss: %0.4f" % (t, loss_val))
       sw.scalar("loss", loss_val, step=t)
       summarize_fn(sw, t, optimizer.target, subkey)
+
       end = timeit.default_timer()
       if t == 0:
         steps_per_sec = 1. / (end - start)
@@ -149,9 +161,11 @@ def parallel_train_loop(key,
                         init_params,
                         loss_fn,
                         summarize_fn=default_summarize,
+                        expensive_summarize_fn=default_summarize,
                         lr=1e-4,
                         num_steps=int(1e5),
                         summarize_every=100,
+                        expensive_summarize_every=100,
                         checkpoint_every=5000,
                         clobber_checkpoint=False,
                         logdir="/tmp/lda_inference"):
@@ -189,6 +203,10 @@ def parallel_train_loop(key,
       print("Checkpoint saved for step %d" % optimizer.state.step)
 
     repl_optimizer, repl_key = train_step(repl_optimizer, repl_key)
+    
+    if t % expensive_summarize_every == 0:
+      key, subkey = jax.random.split(jax_utils.unreplicate(repl_key))
+      summarize_fn(sw, t, optimizer.target, subkey)
 
     if t % summarize_every == 0:
       key, subkey = jax.random.split(jax_utils.unreplicate(repl_key))

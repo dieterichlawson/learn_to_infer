@@ -88,6 +88,8 @@ flags.DEFINE_float("lr", 1e-3,
                    "The learning rate for ADAM.")
 flags.DEFINE_integer("summarize_every", 100,
                      "Number of steps between summaries.")
+flags.DEFINE_integer("expensive_summarize_every", 10000,
+                     "Number of steps between expensive summaries.")
 flags.DEFINE_integer("checkpoint_every", 5000,
                      "Number of steps between checkpoints.")
 flags.DEFINE_boolean("clobber_checkpoint", False,
@@ -341,7 +343,7 @@ def make_summarize(
   compute_metrics = jax.jit(compute_metrics)
 
   def summarize(writer, step, params, key):
-    k1, k2, k3 = jax.random.split(key, num=3)
+    k1, k2 = jax.random.split(key)
     avg_acc, avg_f1, avg_log_marginal = compute_metrics(k1, params)
     writer.scalar("transformer/pairwise_acc", avg_acc, step=step)
     print("Transformer pairwise accuracy: %0.3f" % avg_acc)
@@ -349,16 +351,17 @@ def make_summarize(
     print("Transformer pairwise f1: %0.3f" % avg_f1)
     writer.scalar("transformer/avg_log_marginal", avg_log_marginal, step=step)
     print("Transformer avg log marginal: %0.3f" % avg_log_marginal)
+    if step == 0:
+      summarize_baselines(writer, step, k2)
 
+  def expensive_summarize(writer, step, params, key):
     if data_dim == 2:
       for k in range(min_k, max_k+1):
-        plot_params(k, k*data_points_per_mode, writer, step, params, k2)
+        plot_params(k, k*data_points_per_mode, writer, step, params, key)
       if FLAGS.plot_sklearn_comparison:
         plot_comparisons(writer, step, params)
-    if step == 0:
-      summarize_baselines(writer, step, k3)
 
-  return summarize
+  return summarize, expensive_summarize
 
 
 def make_logdir(config):
@@ -438,7 +441,7 @@ def main(unused_argv):
       mode_var=FLAGS.mode_var,
       data_dim=FLAGS.data_dim,
       batch_size=FLAGS.batch_size)
-  summarize_fn = make_summarize(
+  summarize_fn, expensive_summarize_fn = make_summarize(
       model,
       model_name=FLAGS.model_name,
       min_k=FLAGS.min_k,
@@ -460,7 +463,9 @@ def main(unused_argv):
       lr=FLAGS.lr,
       num_steps=FLAGS.num_steps,
       summarize_fn=summarize_fn,
+      expensive_summarize_fn=expensive_summarize_fn,
       summarize_every=FLAGS.summarize_every,
+      expensive_summarize_every=FLAGS.expensive_summarize_every,
       checkpoint_every=FLAGS.checkpoint_every,
       clobber_checkpoint=FLAGS.clobber_checkpoint,
       logdir=make_logdir(FLAGS))
