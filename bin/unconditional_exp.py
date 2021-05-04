@@ -3,7 +3,7 @@ experiment_name = "unconditional_exp"
 command = "python3 learn_to_infer/run_gmm.py"
 
 job_args = {
-  "model_name": ["mean_scale_weight", "mean_unconditional"],
+  "model_name": ["mean_scale_weight", "msw_unconditional"],
   "data_dim": 2,
   "num_encoders": 4,
   "num_decoders": 2,
