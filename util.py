@@ -455,8 +455,7 @@ def masked_sinkhorn_with_dist(
                             log_w_q, q_num_atoms, q_max_atoms, key, alpha=alpha)
 
 def simple_masked_sinkhorn_with_dist(
-    p_locs, log_w_p, q_locs, log_w_q, num_atoms, max_atoms,
-    dist, length, max_length, key, alpha=0.01):
+    p_locs, log_w_p, q_locs, log_w_q, dist,num_atoms, max_atoms, key, alpha=0.01):
   """Computes the OT distance between two masked atomic measures using 'dist' to compare atoms.
   Args:
     p_locs: The locations of the atoms of p, a tensor of shape [max_length, data_dim].
