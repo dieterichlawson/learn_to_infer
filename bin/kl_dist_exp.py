@@ -14,7 +14,7 @@ job_args = {
   "data_points_per_mode": 100,
   "cov_prior": "inv_wishart",
   "dist_multiplier": .68,
-  "dist": "symm_kl",
+  "dist": ["symm_kl", "l2"],
   "batch_size": 128,
   "eval_batch_size": 256,
   "lr": 1e-3,
