@@ -343,7 +343,7 @@ def make_logdir(config):
   basedir = config.logdir
   exp_dir = (
       "%s"
-      "nheads_%d"
+      "_nheads_%d"
       "_nenc_%d"
       "_ndec_%d"
       "_sepm_%0.2f"
