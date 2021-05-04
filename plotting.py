@@ -100,7 +100,7 @@ def log_marginal(x, mus, covs, ws):
 
 
 def plot_gmms(xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-              em_params):
+              em_params, algo_num_modes=None):
   true_means, true_covs, true_weights = true_params
   pred_means, pred_covs, pred_weights = pred_params
   em_means, em_covs, em_weights = em_params
@@ -108,11 +108,18 @@ def plot_gmms(xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
   plot_gmm_on_ax(ax[0], xs, num_modes, true_cs, true_means, true_covs,
                  true_weights)
   ax[0].set_title("True Clustering")
-  plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs,
-                 pred_weights)
-  ax[1].set_title("Predicted Clustering")
-  plot_gmm_on_ax(ax[2], xs, num_modes, em_cs, em_means, em_covs, em_weights)
-  ax[2].set_title("EM Clustering")
+  if algo_num_modes is None:
+    plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs,
+                   pred_weights)
+    ax[1].set_title("Predicted Clustering")
+    plot_gmm_on_ax(ax[2], xs, num_modes, em_cs, em_means, em_covs, em_weights)
+    ax[2].set_title("EM Clustering")
+  else:
+    plot_gmm_on_ax(ax[1], xs, algo_num_modes, pred_cs, pred_means, pred_covs,
+                   pred_weights)
+    ax[1].set_title("Predicted Clustering")
+    plot_gmm_on_ax(ax[2], xs, algo_num_modes, em_cs, em_means, em_covs, em_weights)
+    ax[2].set_title("EM Clustering")
   return fig
 
 

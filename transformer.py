@@ -249,11 +249,8 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
       inputs: input data, [batch_size, max_num_data_points, data_dim].
       input_lengths: A [batch_size] vector containing the number of samples
         in each batch element.
-      target_lengths: A [batch_size] vector containing the length of each
-        target sequence.
-      targets: The outputs to be produced by the transformer. Supplied only
-        during training. If None, then the transformer's own outputs are fed
-        back in.
+      target_lengths: Unused.
+      targets: Unused.
       target_dim: The length of each output vector.
       max_input_length: An int at least as large as the largest element of
         num_data_points, used for determining output shapes.

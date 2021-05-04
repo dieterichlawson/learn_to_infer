@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 
 flags.DEFINE_enum("model_name", "mean_scale_weight",
                   #["mean", "mean_scale", "mean_scale_weight"],
-                  ["mean_scale_weight", "mean", "msw_unconditional", "mean_unconditional"],
+                  ["mean_scale_weight", "mean", "msw_unconditional", "mean_unconditional", "fixed_k"],
                   "Model to run")
 flags.DEFINE_integer("num_encoders", 6,
                      "Number of encoder modules in the transformer.")
@@ -57,6 +57,11 @@ flags.DEFINE_integer("min_k", 2,
                      "The minimum number of modes in the data.")
 flags.DEFINE_integer("max_k", 10,
                      "the maximum number of modes in the data.")
+flags.DEFINE_integer("algo_k", None,
+                     "the number of modes used in the algorithms. can differ from k,"
+                     " but defaults to k.")
+flags.DEFINE_boolean("fix_em_k", False,
+                     "If true, set EM's num_components to algo_k no matter how many modes.")
 flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
                   "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
@@ -108,7 +113,8 @@ sampling_types = {
  "mean_unconditional": "mean",
  "mean_scale": "mean_scale",
  "mean_scale_weight": "mean_scale_weight",
- "msw_unconditional": "mean_scale_weight"
+ "msw_unconditional": "mean_scale_weight",
+ "fixed_k": "mean_scale_weight"
 }
 
 def make_model(key,
@@ -119,6 +125,7 @@ def make_model(key,
                value_dim=128,
                data_points_per_mode=25,
                max_k=10,
+               algo_k=10,
                data_dim=2,
                normalization="no_norm",
                dist="l2"):
@@ -127,11 +134,12 @@ def make_model(key,
       #"mean_scale": gmm_models.MeanScaleInferenceMachine,
       "mean_scale_weight": gmm_models.MSWOriginal,
       "msw_unconditional": gmm_models.MSWUnconditional,
-      "mean_unconditional": gmm_models.UnconditionalMeanInferenceMachine
+      "mean_unconditional": gmm_models.UnconditionalMeanInferenceMachine,
+      "fixed_k": gmm_models.UnconditionalFixedK,
   }
 
   model = class_dict[model_name](
-      data_dim=data_dim, max_k=max_k,
+      data_dim=data_dim, max_k=max_k, algo_k=algo_k,
       max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
       normalization=normalization, dist=dist)
@@ -172,6 +180,8 @@ def make_summarize(
     model_name="mean",
     min_k=2,
     max_k=10,
+    algo_k=10,
+    fix_em_k=False,
     data_points_per_mode=25,
     cov_dof=10,
     cov_prior="inv_wishart",
@@ -215,8 +225,13 @@ def make_summarize(
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
     xs, cs, ks, _ = sample_eval_batch(subkey)
-    em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
-        xs, cs, ks, ks*data_points_per_mode)
+    if fix_em_k:
+      em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
+          xs, cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
+    else:
+      em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
+          xs, cs, ks, ks*data_points_per_mode)
+
     # EM
     writer.scalar("em/pairwise_acc", em_metrics[0], step=step)
     print("em pairwise acc: %0.3f" % em_metrics[0])
@@ -240,8 +255,14 @@ def make_summarize(
     xs, true_cs, true_params, pred_cs, pred_params = outs
     pred_cs = pred_cs[0]
     pred_params = (pred_params[0][0], pred_params[1][0], pred_params[2][0])
-    em_cs, em_params = plotting.fit_em(xs, num_modes)
-    fig = plotting.plot_gmms(
+    if fix_em_k:
+      em_cs, em_params = plotting.fit_em(xs, algo_k)
+      fig = plotting.plot_gmms(
+        xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
+        em_params, algo_num_modes=algo_k)
+    else:
+      em_cs, em_params = plotting.fit_em(xs, num_modes)
+      fig = plotting.plot_gmms(
         xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
         em_params)
     plot_img = plotting.plot_to_numpy_image(plt)
@@ -330,7 +351,8 @@ def make_summarize(
     print("Transformer avg log marginal: %0.3f" % avg_log_marginal)
 
     if data_dim == 2:
-      plot_params(min_k, min_k*data_points_per_mode, writer, step, params, k2)
+      for k in range(min_k, max_k+1):
+        plot_params(k, k*data_points_per_mode, writer, step, params, k2)
       if FLAGS.plot_sklearn_comparison:
         plot_comparisons(writer, step, params)
     if step == 0:
@@ -350,6 +372,7 @@ def make_logdir(config):
       "_data_dim_%d"
       "_mink_%d"
       "_maxk_%d"
+      "_algo_%d"
       "_dps_per_k_%d"
       "_cov_prior_%s"
       "_cov_dof_%d"
@@ -358,8 +381,8 @@ def make_logdir(config):
       "_tpu%s" % (
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
-        config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
-        config.data_points_per_mode, config.cov_prior, 
+        config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
+        config.algo_k, config.data_points_per_mode, config.cov_prior, 
         config.cov_dof, config.normalization, config.dist, config.tag)
       )
   return os.path.join(basedir, exp_dir)
@@ -399,6 +422,7 @@ def main(unused_argv):
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
+      algo_k=FLAGS.algo_k,
       data_dim=FLAGS.data_dim, 
       normalization=FLAGS.normalization,
       dist=FLAGS.dist)
@@ -419,6 +443,8 @@ def main(unused_argv):
       model_name=FLAGS.model_name,
       min_k=FLAGS.min_k,
       max_k=FLAGS.max_k,
+      algo_k=FLAGS.algo_k,
+      fix_em_k=FLAGS.fix_em_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,

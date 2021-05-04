@@ -43,6 +43,22 @@ def unflatten_scale(flat_scale, original_dim):
   exp_diag = jnp.exp(jnp.diag(out))
   return out.at[jnp.diag_indices(original_dim)].set(exp_diag)
 
+def flatten_means_scales(means, scales):
+  """
+  means: A [max_k, data_dim] tensor containing the means.
+  scales: A [max_k, data_dim, data_dim] tensor containing the scale matrices
+  """
+  flat_scales = vmap(flatten_scale)(scales)
+  flat_params = jnp.concatenate([means, flat_scales], axis=-1)
+  return flat_params
+
+def unflatten_means_scales(flat_params, original_dim):
+  return vmap(unflatten_mean_scale, in_axes=(0,None))(flat_params, original_dim)
+
+def unflatten_mean_scale(flat_params, original_dim):
+  mu = flat_params[:original_dim]
+  scale = unflatten_scale(flat_params[original_dim:], original_dim)
+  return mu, scale
 
 def flatten_gmm_params(means, scales, log_weights):
   """
@@ -54,7 +70,6 @@ def flatten_gmm_params(means, scales, log_weights):
   flat_params = jnp.concatenate(
         [log_weights[:, jnp.newaxis], means, flat_scales], axis=-1)
   return flat_params
-
 
 def unflatten_gmm_params(flat_params, original_dim):
   """
@@ -254,7 +269,7 @@ class MeanInferenceMachine(GMMInferenceMachine):
     log_weights = jnp.zeros([self.max_k])
     
     def loss_fn(preds, targets, length, key):
-      return util.masked_sinkhorn_with_dist(preds, log_weights, targets, log_weights,
+      return util.simple_masked_sinkhorn_with_dist(preds, log_weights, targets, log_weights,
           self.dist, length, self.max_k, key, alpha=self.entropy_alpha)[0]
 
     return vmap(loss_fn)(preds, true_means, ks, jax.random.split(key, num=batch_size))
@@ -303,6 +318,7 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
   def __init__(self,
                data_dim=2,
                max_k=2,
+               algo_k=None,
                max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
@@ -352,6 +368,7 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
   def __init__(self,
                data_dim=2,
                max_k=2,
+               algo_k=None,
                max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
@@ -428,7 +445,7 @@ class MeanScaleWeightInferenceMachine(GMMInferenceMachine):
     log_weights = jnp.zeros([self.max_k])
 
     def loss_fn(preds, targets, length, key):
-      return util.masked_sinkhorn_with_dist(preds, log_weights, targets, log_weights,
+      return util.simple_masked_sinkhorn_with_dist(preds, log_weights, targets, log_weights,
           self.dist, length, self.max_k, key, alpha=self.entropy_alpha)[0]
 
     return vmap(loss_fn)(preds, flat_true_params, ks, jax.random.split(key, num=batch_size))
@@ -494,6 +511,7 @@ class MSWOriginal(MeanScaleWeightInferenceMachine):
   def __init__(self,
                data_dim=2,
                max_k=2,
+               algo_k=None,
                max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
@@ -541,6 +559,7 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
   def __init__(self,
                data_dim=2,
                max_k=2,
+               algo_k=None,
                max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
@@ -598,4 +617,108 @@ def classify_with_defaults(model, params, inputs, batch_size, input_lengths, ks,
     mus, covs, log_weights = model_params
   return cs, (mus, covs, log_weights)
 
+
+class FixedKInferenceMachine(MeanScaleWeightInferenceMachine):
+
+  def __init__(self,
+               model,
+               data_dim=2,
+               max_k=2,
+               algo_k=2,
+               max_num_data_points=25,
+               dist="symm_kl",
+               entropy_alpha=0.01):
+    self.algo_k = algo_k
+    super().__init__(model, data_dim=data_dim, max_k=max_k,
+        max_num_data_points=max_num_data_points, dist=dist, entropy_alpha=entropy_alpha)
+
+
+  def loss(self, params, inputs, input_lengths, true_params, ks, key):
+    """Computes the wasserstein loss for this model.
+
+    Args:
+      params: The parameters of the model, returned from init().
+      inputs: A [batch_size, max_num_data_points, data_dim] set of input data.
+      input_lengths: A [batch_size] set of integers representing the number of
+        data points in each batch element.
+      true_params: A three-tuple containing
+        true_means: A [batch_size, max_k, data_dim] tensor containing the true
+          means of the cluster components for each batch element.
+        true_scales: A [batch_size, max_k, data_dim, data_dim] tensor containing
+          the true scales of the cluster components for each batch element.
+          Should be the lower-triangular square root of a PSD matrix.
+        true_log_weights: A [batch_size, max_k] tensor containing the true
+          log weights of the cluster components for each batch element.
+      ks: A [batch_size] set of integers representing the true number of
+        clusters in each batch element.
+      key: A JAX PRNG key.
+    Returns:
+      The wasserstein distance from the set of predicted mus to the true set
+      of mus, a tensor of shape [batch_size].
+    """
+    batch_size = inputs.shape[0]
+    true_means, true_scales, true_log_weights = true_params
+    true_flat_params = vmap(flatten_means_scales)(true_means, true_scales)
+    # ks (target lengths) is not used here.
+    preds = self.model.call(params, inputs, input_lengths, ks)
+    pred_log_weights = preds[:, :, 0]
+    pred_flat_params = preds[:, :, 1:]
+
+    def loss_fn(preds, pred_log_weights, targets, target_log_weights, length, key):
+      return util.masked_sinkhorn_with_dist(
+          preds, pred_log_weights, self.algo_k, self.algo_k,
+          targets, target_log_weights, length, self.max_k,
+          self.dist, key, alpha=self.entropy_alpha)[0]
+
+    return vmap(loss_fn)(pred_flat_params, pred_log_weights,
+                         true_flat_params, true_log_weights, 
+                         ks, jax.random.split(key, num=batch_size))
+
+
+class UnconditionalFixedK(FixedKInferenceMachine):
+  """An unconditional MSW Inference machine that doesn't feed back predictions."""
+
+  def __init__(self,
+               data_dim=2,
+               max_k=2,
+               algo_k=2,
+               max_num_data_points=25,
+               num_heads=8,
+               num_encoders=6,
+               num_decoders=6,
+               qkv_dim=512,
+               activation_fn=flax.nn.relu,
+               normalization="no_norm",
+               dist="l2",
+               weight_init=jax.nn.initializers.xavier_uniform(),
+               entropy_alpha=0.01):
+    """Creates the model.
+
+    Args:
+      data_dim: The dimensionality of the data points to be fed in.
+      max_k: The maximum number of clusters that could occur in the data.
+      max_num_data_points: The maximum number of data points that could be
+        fed in at one time.
+      num_heads: The number of heads to use in the transformer.
+      num_encoders: The number of encoder layers to use in the transformer.
+      num_decoders: The number of decoder layers to use in the transformer.
+      qkv_dim: The dimensions of the queries, keys, and values in the
+        transformer.
+      activation_fn: The activation function to use for hidden layers.
+      normalization: The type of normalization to use, either layernorm or no_norm.
+      dist: The distance function to use
+      weight_init: The weight initializer.
+      entropy_alpha: The weight of the entropy regularization in the loss.
+    """
+    target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
+    model = transformer.UnconditionalEncoderDecoderTransformer.partial(
+        target_dim=target_dim,
+        max_input_length=max_num_data_points, max_target_length=algo_k,
+        num_heads=num_heads, num_encoders=num_encoders,
+        num_decoders=num_decoders, qkv_dim=qkv_dim,
+        activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
+    super().__init__(
+        model, data_dim=data_dim, max_k=max_k, algo_k=algo_k,
+        max_num_data_points=max_num_data_points,
+        dist=dist, entropy_alpha=entropy_alpha)
 
