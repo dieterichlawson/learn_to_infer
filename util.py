@@ -355,7 +355,7 @@ def sinkhorn(C, log_w_p, log_w_q, key, alpha=0.01):
     new_nu = alpha * (pre_nu - log_w_p - 1.)
     return new_nu  # - jnp.amax(new_nu)
 
-  nu_0 = jax.random.normal(key, [log_w_q.shape[0]])
+  nu_0 = jax.random.normal(key, [log_w_p.shape[0]])
 
   nu_star = fixed_point(sinkhorn_step, (log_w_p, log_w_q, C), nu_0)
 
