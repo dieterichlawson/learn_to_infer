@@ -401,6 +401,9 @@ def main(unused_argv):
     FLAGS.min_k = FLAGS.k
     FLAGS.max_k = FLAGS.k
 
+  if FLAGS.algo_k is None:
+    FLAGS.algo_k = FLAGS.max_k
+
   if FLAGS.debug_nans:
     config.update("jax_debug_nans", True)
 
