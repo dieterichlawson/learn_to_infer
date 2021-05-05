@@ -153,6 +153,7 @@ def local_train_loop(
       print("Steps/sec: %0.2f" % steps_per_sec)
       sw.scalar("steps_per_sec", steps_per_sec, step=t)
       start = end
+      sw.scalar("lr", lr_fn(t), step=t)
       sw.flush()
       sys.stdout.flush()
 
@@ -224,6 +225,7 @@ def parallel_train_loop(key,
       print("Steps/sec: %0.2f" % steps_per_sec)
       sw.scalar("steps_per_sec", steps_per_sec, step=t)
       start = end
+      sw.scalar("lr", lr_fn(t), step=t)
       sw.flush()
       sys.stdout.flush()
 
