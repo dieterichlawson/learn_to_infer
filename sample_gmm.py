@@ -501,45 +501,27 @@ def batch_with_all_random_params_random_ks(
 
 
 def sample_batch_random_ks(
-    key, sampling_type, batch_size, min_k, max_k, data_points_per_mode,
+    key, sampling_type, batch_size, min_k, max_k, num_data_points,
     data_dim, mode_variance, cov_dof, cov_prior, dist_mult):
   if sampling_type == "mean":
     xs, cs, ks, params = batch_with_random_mu_random_ks(
         key, batch_size, min_k, max_k,
-        max_k*data_points_per_mode, data_dim,
+        num_data_points, data_dim,
         jnp.eye(data_dim)*mode_variance, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale":
     xs, cs, ks, params = batch_with_random_mu_cov_random_ks(
         key, batch_size, min_k, max_k,
-        max_k*data_points_per_mode, data_dim,
+        num_data_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, ks, params = batch_with_all_random_params_random_ks(
         key, batch_size, min_k, max_k,
-        max_k*data_points_per_mode, data_dim,
+        num_data_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, dist_mult)
   return xs, cs, ks, params
 
 
 def sample_batch_fixed_ks(
-    key, sampling_type, ks, max_k, data_points_per_mode, data_dim,
-    mode_variance, cov_dof, cov_prior, dist_mult):
-  if sampling_type == "mean":
-    xs, cs, params = batch_with_random_mu_fixed_ks(
-        key, ks, max_k, max_k*data_points_per_mode, data_dim,
-        jnp.eye(data_dim)*mode_variance, jnp.zeros([max_k]), dist_mult)
-  elif sampling_type == "mean_scale":
-    xs, cs, params = batch_with_random_mu_cov_fixed_ks(
-        key, ks, max_k, max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), dist_mult)
-  elif sampling_type == "mean_scale_weight":
-    xs, cs, params = batch_with_all_random_params_fixed_ks(
-        key, ks, max_k, max_k*data_points_per_mode, data_dim,
-        cov_dof, jnp.eye(data_dim), cov_prior, dist_mult)
-  return xs, cs, params
-
-
-def sample_batch_fixed_ks2(
     key, sampling_type, ks, max_k, num_data_points, data_dim,
     mode_variance, cov_dof, cov_prior, dist_mult):
   if sampling_type == "mean":

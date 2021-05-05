@@ -162,7 +162,7 @@ def make_loss(model,
 
   def sample_train_batch(key):
     return sample_gmm.sample_batch_random_ks(
-        key, sampling_types[model_name], batch_size, min_k, max_k, data_points_per_mode,
+        key, sampling_types[model_name], batch_size, min_k, max_k, max_k*data_points_per_mode,
         data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   def loss(params, key):
@@ -192,15 +192,15 @@ def make_summarize(
 
   def sample_eval_batch(key):
     return sample_gmm.sample_batch_random_ks(
-        key, sampling_types[model_name], eval_batch_size, min_k, max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+        key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
+        max_k*data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
   def sample_single_gmm(key, num_modes):
     xs, cs, params = sample_gmm.sample_batch_fixed_ks(
-        key, sampling_types[model_name], jnp.array([num_modes]), max_k, data_points_per_mode,
-        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+        key, sampling_types[model_name], jnp.array([num_modes]), max_k, 
+        max_k*data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
     return xs[0], cs[0], (params[0][0], params[1][0], params[2][0])
 
@@ -412,7 +412,7 @@ def main(unused_argv):
     fix_em_k = False
     FLAGS.algo_k = FLAGS.max_k
   else:
-    assert FLAGS.model_type == "fixed_k", "Fixing algo k only possible with fixed_k model"
+    assert FLAGS.model_name == "fixed_k", "Fixing algo k only possible with fixed_k model"
     fix_em_k = True
     
   if FLAGS.debug_nans:
