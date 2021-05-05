@@ -30,6 +30,36 @@ import jax.scipy as jscipy
 import tensorflow_probability as tfp
 tfd = tfp.substrates.jax.distributions
 
+
+def masked_classify_points(xs, means, covs, log_weights, k):
+  log_p_fn = jscipy.stats.multivariate_normal.logpdf
+  # [max_k, num_data_points]
+  log_ps = vmap(log_p_fn, in_axes=(None, 0, 0))(xs, means, covs)
+  # Make weights for unused ks -infinity
+  masked_log_ws =  jnp.where(
+      jnp.arange(log_weights.shape[0]) < k,
+      log_weights,
+      jnp.full_like(log_weights, -jnp.inf))
+  # add the log weight to each row
+  log_ps = log_ps + masked_log_ws[:, jnp.newaxis]
+  return jnp.argmax(log_ps, axis=0)
+
+def classify_with_defaults(model, params, inputs, batch_size, input_lengths, ks,
+                           max_k, default_cov):
+  cs, model_params = model.classify(params, inputs, input_lengths, ks)
+  if isinstance(model, MeanInferenceMachine):
+    mus = model_params
+    covs = jnp.tile(default_cov[jnp.newaxis, jnp.newaxis, :, :],
+                    [batch_size, max_k, 1, 1])
+    log_weights = jnp.zeros([batch_size, max_k])
+  #elif isinstance(model, MeanScaleInferenceMachine):
+  #  raise NotImplementedError("Classify with defaults not implemented for MeanScale models")
+  elif (isinstance(model, MeanScaleWeightInferenceMachine) or
+        isinstance(model, NoDecoderInferenceMachine)):
+    mus, covs, log_weights = model_params
+  return cs, (mus, covs, log_weights)
+
+
 def flatten_scale(scale):
   dim = scale.shape[-1]
   log_diag = jnp.log(jnp.diag(scale))
@@ -490,19 +520,9 @@ class MeanScaleWeightInferenceMachine(GMMInferenceMachine):
     """
     means, scales, log_weights = self.predict(params, inputs, input_lengths, ks)
     covs = jnp.einsum("...ik,...jk->...ij", scales, scales)
+    cs = vmap(masked_classify_points)(inputs, means, covs, log_weights, ks)
+    return cs, (means, covs, log_weights)
 
-    log_ps = vmap(
-        vmap(
-            vmap(
-                jscipy.stats.multivariate_normal.logpdf,
-                in_axes=(0, None, None)),
-            in_axes=(None, 0, 0)))(inputs, means, covs)
-    log_ps = log_ps + log_weights[Ellipsis, jnp.newaxis]
-    log_ps = jnp.where(
-        util.make_mask(ks, self.max_k)[:, :, jnp.newaxis], log_ps,
-        jnp.full_like(log_ps, -jnp.inf))
-    clusters = jnp.argmax(log_ps, axis=-2)
-    return clusters, (means, covs, log_weights)
 
 
 class MSWOriginal(MeanScaleWeightInferenceMachine):
@@ -600,22 +620,6 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
         max_num_data_points=max_num_data_points,
         dist=dist, entropy_alpha=entropy_alpha)
 
-
-def classify_with_defaults(model, params, inputs, batch_size, input_lengths, ks,
-                           max_k, default_cov):
-  cs, model_params = model.classify(params, inputs, input_lengths, ks)
-  if isinstance(model, MeanInferenceMachine):
-    mus = model_params
-    covs = jnp.tile(default_cov[jnp.newaxis, jnp.newaxis, :, :],
-                    [batch_size, max_k, 1, 1])
-    log_weights = jnp.zeros([batch_size, max_k])
-  #elif isinstance(model, MeanScaleInferenceMachine):
-  #  mus, covs = model_params
-  #  log_weights = jnp.zeros([batch_size, max_k])
-  elif (isinstance(model, MeanScaleWeightInferenceMachine) or
-        isinstance(model, NoDecoderInferenceMachine)):
-    mus, covs, log_weights = model_params
-  return cs, (mus, covs, log_weights)
 
 
 class FixedKInferenceMachine(MeanScaleWeightInferenceMachine):

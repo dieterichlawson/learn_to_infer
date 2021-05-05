@@ -191,9 +191,14 @@ def make_summarize(
     eval_batch_size=256):
 
   def sample_eval_batch(key):
-    return sample_gmm.sample_batch_random_ks(
+    xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
         key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-        max_k*data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+        2 * max_k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+    train_xs = xs[:, :max_k * data_points_per_mode]
+    test_xs = xs[:, max_k * data_points_per_mode:]
+    train_cs = cs[:, :max_k * data_points_per_mode]
+    test_cs = cs[:, max_k * data_points_per_mode:]
+    return train_xs, test_xs, train_cs, test_cs, ks, params
 
   sample_eval_batch = jax.jit(sample_eval_batch)
 
@@ -210,9 +215,12 @@ def make_summarize(
         max_k, jnp.eye(data_dim)*mode_var)
 
   def sample_and_classify_eval_batch(key, params):
-    xs, cs, ks, true_gmm_params = sample_eval_batch(key)
-    tfmr_cs, tfmr_gmm_params = model_classify(params, xs, ks)
-    return xs, cs, ks, true_gmm_params, tfmr_cs, tfmr_gmm_params
+    train_xs, test_xs, train_cs, test_cs, ks, true_gmm_params = sample_eval_batch(key)
+    tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks)
+    tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
+            test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
+    return (train_xs, test_xs, tfmr_train_cs, train_cs, tfmr_test_cs, test_cs, ks, 
+            true_gmm_params, tfmr_gmm_params)
 
   def sample_and_classify_single_gmm(key, params, num_modes):
     xs, cs, gmm_params = sample_single_gmm(key, num_modes)
@@ -221,31 +229,39 @@ def make_summarize(
     return xs, cs, gmm_params, tfmr_cs, tfmr_gmm_params
 
   sample_and_classify_single_gmm = jax.jit(sample_and_classify_single_gmm)
+  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch)
 
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
-    xs, cs, ks, _ = sample_eval_batch(subkey)
-    if fix_em_k:
-      em_metrics, dpmm_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
-          xs, cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
-    else:
-      em_metrics, dpmm_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
-          xs, cs, ks, ks*data_points_per_mode)
+    train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(subkey)
+    #if fix_em_k:
+    #  em_metrics, _, _, _ = gmm_eval.compute_masked_baseline_metrics(
+    #      train_xs, train_cs, test_xs, test_cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
+    #else:
+    em_metrics = gmm_eval.compute_masked_baseline_metrics(
+          train_xs, train_cs, test_xs, test_cs, ks, ks*data_points_per_mode)
 
     # EM
-    writer.scalar("em/pairwise_acc", em_metrics[0], step=step)
-    print("em pairwise acc: %0.3f" % em_metrics[0])
-    writer.scalar("em/pairwise_f1", em_metrics[1], step=step)
-    print("em pairwise f1: %0.3f" % em_metrics[1])
-    writer.scalar("em/avg_ll", em_metrics[2], step=step)
-    print("em avg ll: %0.3f" % em_metrics[2])
-    # DPMM
-    writer.scalar("dpmm/pairwise_acc", dpmm_metrics[0], step=step)
-    print("dpmm pairwise acc: %0.3f" % dpmm_metrics[0])
-    writer.scalar("dpmm/pairwise_f1", dpmm_metrics[1], step=step)
-    print("dpmm pairwise f1: %0.3f" % dpmm_metrics[1])
-    writer.scalar("dpmm/avg_ll", dpmm_metrics[2], step=step)
-    print("dpmm avg ll: %0.3f" % dpmm_metrics[2])
+    writer.scalar("em_train/pairwise_acc", em_metrics[0], step=step)
+    print("em train pairwise acc: %0.3f" % em_metrics[0])
+    writer.scalar("em_train/pairwise_f1", em_metrics[1], step=step)
+    print("em train pairwise f1: %0.3f" % em_metrics[1])
+    writer.scalar("em_train/avg_ll", em_metrics[2], step=step)
+    print("em train avg ll: %0.3f" % em_metrics[2])
+    writer.scalar("em_test/pairwise_acc", em_metrics[3], step=step)
+    print("em test pairwise acc: %0.3f" % em_metrics[3])
+    writer.scalar("em_test/pairwise_f1", em_metrics[4], step=step)
+    print("em test pairwise f1: %0.3f" % em_metrics[4])
+    writer.scalar("em_test/avg_ll", em_metrics[5], step=step)
+    print("em test avg ll: %0.3f" % em_metrics[5])
+
+    ## DPMM
+    #writer.scalar("dpmm/pairwise_acc", dpmm_metrics[0], step=step)
+    #print("dpmm pairwise acc: %0.3f" % dpmm_metrics[0])
+    #writer.scalar("dpmm/pairwise_f1", dpmm_metrics[1], step=step)
+    #print("dpmm pairwise f1: %0.3f" % dpmm_metrics[1])
+    #writer.scalar("dpmm/avg_ll", dpmm_metrics[2], step=step)
+    #print("dpmm avg ll: %0.3f" % dpmm_metrics[2])
 
     ## Spectral RBF
     #writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
@@ -263,17 +279,17 @@ def make_summarize(
     xs, true_cs, true_params, pred_cs, pred_params = outs
     pred_cs = pred_cs[0]
     pred_params = (pred_params[0][0], pred_params[1][0], pred_params[2][0])
-    if fix_em_k:
-      em_cs, em_params = gmm_eval.em_fit_and_predict(xs, algo_k)
-      dpmm_cs, dpmm_params = gmm_eval.dpmm_fit_and_predict(xs, algo_k)
-      fig = plotting.plot_em_dpmm_comparison(
-        xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-        em_params, dpmm_cs, dpmm_params, algo_k)
-    else:
-      em_cs, em_params = gmm_eval.em_fit_and_predict(xs, num_modes)
-      fig = plotting.plot_em_comparison(
-        xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-        em_params)
+    #if fix_em_k:
+    #  em_cs, em_params = gmm_eval.em_fit_and_predict(xs, algo_k)
+    #  dpmm_cs, dpmm_params = gmm_eval.dpmm_fit_and_predict(xs, algo_k)
+    #  fig = plotting.plot_em_dpmm_comparison(
+    #    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
+    #    em_params, dpmm_cs, dpmm_params, algo_k)
+    #else:
+    em_cs, em_params = gmm_eval.em_fit_and_predict(xs, num_modes)
+    fig = plotting.plot_em_comparison(
+      xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
+      em_params)
     plot_img = plotting.plot_to_numpy_image(plt)
     writer.image(
         "%d_modes_%d_points" % (num_modes, num_data_points),
@@ -342,22 +358,36 @@ def make_summarize(
     plt.close(fig)
 
   def compute_metrics(key, params):
-    xs, cs, ks, _, tfmr_cs, tfmr_gmm_params  = sample_and_classify_eval_batch(key, params)
-    avg_acc, avg_f1, avg_log_marginal = gmm_eval.compute_metrics(
-        xs, tfmr_gmm_params, cs, tfmr_cs, ks*data_points_per_mode, ks)
-    return avg_acc, avg_f1, avg_log_marginal
+    (train_xs, test_xs, 
+     tfmr_train_cs, train_cs, 
+     tfmr_test_cs, test_cs, 
+     ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params)
+    train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
+        train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*data_points_per_mode, ks)
+    test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
+        test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
+    return train_acc, train_f1, train_log_marginal, test_acc, test_f1, test_log_marginal
 
   compute_metrics = jax.jit(compute_metrics)
 
   def summarize(writer, step, params, key):
     k1, k2 = jax.random.split(key)
-    avg_acc, avg_f1, avg_log_marginal = compute_metrics(k1, params)
-    writer.scalar("transformer/pairwise_acc", avg_acc, step=step)
-    print("Transformer pairwise accuracy: %0.3f" % avg_acc)
-    writer.scalar("transformer/pairwise_f1", avg_f1, step=step)
-    print("Transformer pairwise f1: %0.3f" % avg_f1)
-    writer.scalar("transformer/avg_log_marginal", avg_log_marginal, step=step)
-    print("Transformer avg log marginal: %0.3f" % avg_log_marginal)
+    (train_acc, train_f1, train_log_marginal, 
+        test_acc, test_f1, test_log_marginal) = compute_metrics(k1, params)
+    writer.scalar("transformer_train/pairwise_acc", train_acc, step=step)
+    print("Transformer train pairwise accuracy: %0.3f" % train_acc)
+    writer.scalar("transformer_train/pairwise_f1", train_f1, step=step)
+    print("Transformer train pairwise f1: %0.3f" % train_f1)
+    writer.scalar("transformer_train/log_marginal", train_log_marginal, step=step)
+    print("Transformer train log marginal: %0.3f" % train_log_marginal)
+
+    writer.scalar("transformer_test/pairwise_acc", test_acc, step=step)
+    print("Transformer test pairwise accuracy: %0.3f" % test_acc)
+    writer.scalar("transformer_test/pairwise_f1", test_f1, step=step)
+    print("Transformer test pairwise f1: %0.3f" % test_f1)
+    writer.scalar("transformer_test/log_marginal", test_log_marginal, step=step)
+    print("Transformer test log marginal: %0.3f" % test_log_marginal)
+
     if step == 0:
       summarize_baselines(writer, step, k2)
 

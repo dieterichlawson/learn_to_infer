@@ -28,6 +28,8 @@ import sklearn.cluster
 import sklearn.metrics
 import sklearn.mixture
 
+import gmm_models
+
 import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
 
@@ -160,40 +162,69 @@ def agglomerative_fit_and_predict(xs, num_modes):
       n_clusters=num_modes,
       affinity="euclidean").fit_predict(xs)
 
+def compute_model_metrics(xs, cs, pred_cs, pred_params, num_points, num_modes):
+  pred_mus, pred_covs, pred_log_ws = pred_params
+  acc = masked_pairwise_accuracy(pred_cs, cs, num_points)
+  f1 = masked_pairwise_binary_f1(pred_cs, cs, num_points)
+  ll = masked_log_marginal_per_x(xs, pred_mus, pred_covs, pred_log_ws, num_points, num_modes)
+  return acc, f1, ll
 
-def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
-  batch_size = xs.shape[0]
+def compute_masked_baseline_metrics(train_xs, train_cs, test_xs, test_cs, num_modes, num_points):
+  batch_size = train_xs.shape[0]
 
   # EM
-  em_acc_tot = 0.
-  em_f1_tot = 0.
-  em_ll_tot = 0.
+  em_train_acc_tot = 0.
+  em_train_f1_tot = 0.
+  em_train_ll_tot = 0.
+  em_test_acc_tot = 0.
+  em_test_f1_tot = 0.
+  em_test_ll_tot = 0.
   for i in range(batch_size):
-    pred_cs, pred_params = em_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
-    pred_mus, pred_covs, pred_log_ws = pred_params
-    em_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
-    em_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
-    em_ll_tot += masked_log_marginal_per_x(
-        xs[i, :num_points[i]], pred_mus, pred_covs, pred_log_ws, num_points[i], num_modes[i])
-  em_avg_acc = em_acc_tot / batch_size
-  em_avg_f1 = em_f1_tot / batch_size
-  em_avg_ll = em_ll_tot / batch_size
- 
+    n_i = num_points[i]
+    k_i = num_modes[i]
+    train_xi = train_xs[i, :n_i]
+    train_ci = train_cs[i, :n_i]
+    test_xi = test_xs[i, :n_i]
+    test_ci = test_cs[i, :n_i]
 
-  # DPGMM 
-  dpmm_acc_tot = 0.
-  dpmm_f1_tot = 0.
-  dpmm_ll_tot = 0.
-  for i in range(batch_size):
-    pred_cs, pred_params = dpmm_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+    train_pred_cs, pred_params = em_fit_and_predict(train_xi, k_i)
     pred_mus, pred_covs, pred_log_ws = pred_params
-    dpmm_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
-    dpmm_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
-    dpmm_ll_tot += masked_log_marginal_per_x(
-        xs[i, :num_points[i]], pred_mus, pred_covs, pred_log_ws, num_points[i], num_modes[i])
-  dpmm_avg_acc = dpmm_acc_tot / batch_size
-  dpmm_avg_f1 = dpmm_f1_tot / batch_size
-  dpmm_avg_ll = dpmm_ll_tot / batch_size
+    test_pred_cs = gmm_models.masked_classify_points(
+        test_xi, pred_mus, pred_covs,  pred_log_ws, k_i)
+
+    train_acc, train_f1, train_ll = compute_model_metrics(
+        train_xi, train_ci, train_pred_cs, pred_params, n_i, k_i)
+    test_acc, test_f1, test_ll = compute_model_metrics(
+        test_xi, test_ci, test_pred_cs, pred_params, n_i, k_i)
+
+    em_train_acc_tot += train_acc
+    em_train_f1_tot += train_f1
+    em_train_ll_tot += train_ll
+    em_test_acc_tot += test_acc 
+    em_test_f1_tot += test_f1
+    em_test_ll_tot += test_ll
+
+  em_train_acc = em_train_acc_tot / batch_size
+  em_train_f1 = em_train_f1_tot / batch_size
+  em_train_ll = em_train_ll_tot / batch_size
+  em_test_acc = em_test_acc_tot / batch_size
+  em_test_f1 = em_test_f1_tot / batch_size
+  em_test_ll = em_test_ll_tot / batch_size
+
+  ## DPGMM 
+  #dpmm_acc_tot = 0.
+  #dpmm_f1_tot = 0.
+  #dpmm_ll_tot = 0.
+  #for i in range(batch_size):
+  #  pred_cs, pred_params = dpmm_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+  #  pred_mus, pred_covs, pred_log_ws = pred_params
+  #  dpmm_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #  dpmm_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
+  #  dpmm_ll_tot += masked_log_marginal_per_x(
+  #      xs[i, :num_points[i]], pred_mus, pred_covs, pred_log_ws, num_points[i], num_modes[i])
+  #dpmm_avg_acc = dpmm_acc_tot / batch_size
+  #dpmm_avg_f1 = dpmm_f1_tot / batch_size
+  #dpmm_avg_ll = dpmm_ll_tot / batch_size
 
   ##Spectral RBF
   #srbf_acc_tot = 0.
@@ -215,8 +246,4 @@ def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
   #agg_avg_acc = agg_acc_tot / batch_size
   #agg_avg_f1 = agg_f1_tot / batch_size
 
-  return ((em_avg_acc, em_avg_f1, em_avg_ll), 
-          (dpmm_avg_acc, dpmm_avg_f1, dpmm_avg_ll),
-          (0.,0.), (0.,0.))
-          #(srbf_avg_acc, srbf_avg_f1), 
-          #(agg_avg_acc, agg_avg_f1))
+  return (em_train_acc, em_train_f1, em_train_ll, em_test_acc, em_test_f1, em_test_ll)
