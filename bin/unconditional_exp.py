@@ -21,6 +21,7 @@ job_args = {
   "lr": 1e-3,
   "checkpoint_every": 10000,
   "summarize_every": 2500,
+  "expensive_summarize_every": 10000,
   "num_steps": int(1e8),
   "normalization": ["layer_norm", "no_norm"],
   "logdir": "gs://l2i/%s" % experiment_name

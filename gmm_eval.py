@@ -135,8 +135,18 @@ def em_fit_and_predict(xs, num_modes):
   mus = model.means_
   covs = model.covariances_
   log_ws = onp.log(model.weights_)
-  return preds, mus, covs, log_ws
+  return preds, (mus, covs, log_ws)
 
+def dpmm_fit_and_predict(xs, num_modes):
+  model = sklearn.mixture.BayesianGaussianMixture(
+      covariance_type="full",
+      n_components=num_modes,
+      init_params="kmeans").fit(xs)
+  preds = model.predict(xs)
+  mus = model.means_
+  covs = model.covariances_
+  log_ws = onp.log(model.weights_)
+  return preds, (mus, covs, log_ws)
 
 def spectral_rbf_fit_and_predict(xs, num_modes):
   return sklearn.cluster.SpectralClustering(
@@ -159,8 +169,8 @@ def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
   em_f1_tot = 0.
   em_ll_tot = 0.
   for i in range(batch_size):
-    pred_cs, pred_mus, pred_covs, pred_log_ws = em_fit_and_predict(
-        xs[i, :num_points[i]], num_modes[i])
+    pred_cs, pred_params = em_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+    pred_mus, pred_covs, pred_log_ws = pred_params
     em_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
     em_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
     em_ll_tot += masked_log_marginal_per_x(
@@ -168,7 +178,23 @@ def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
   em_avg_acc = em_acc_tot / batch_size
   em_avg_f1 = em_f1_tot / batch_size
   em_avg_ll = em_ll_tot / batch_size
-  
+ 
+
+  # DPGMM 
+  dpmm_acc_tot = 0.
+  dpmm_f1_tot = 0.
+  dpmm_ll_tot = 0.
+  for i in range(batch_size):
+    pred_cs, pred_params = dpmm_fit_and_predict(xs[i, :num_points[i]], num_modes[i])
+    pred_mus, pred_covs, pred_log_ws = pred_params
+    dpmm_acc_tot += masked_pairwise_accuracy(pred_cs, cs[i, :num_points[i]], num_points[i])
+    dpmm_f1_tot += masked_pairwise_binary_f1(pred_cs, cs[i, :num_points[i]], num_points[i])
+    dpmm_ll_tot += masked_log_marginal_per_x(
+        xs[i, :num_points[i]], pred_mus, pred_covs, pred_log_ws, num_points[i], num_modes[i])
+  dpmm_avg_acc = dpmm_acc_tot / batch_size
+  dpmm_avg_f1 = dpmm_f1_tot / batch_size
+  dpmm_avg_ll = dpmm_ll_tot / batch_size
+
   ##Spectral RBF
   #srbf_acc_tot = 0.
   #srbf_f1_tot = 0.
@@ -190,6 +216,7 @@ def compute_masked_baseline_metrics(xs, cs, num_modes, num_points):
   #agg_avg_f1 = agg_f1_tot / batch_size
 
   return ((em_avg_acc, em_avg_f1, em_avg_ll), 
+          (dpmm_avg_acc, dpmm_avg_f1, dpmm_avg_ll),
           (0.,0.), (0.,0.))
           #(srbf_avg_acc, srbf_avg_f1), 
           #(agg_avg_acc, agg_avg_f1))

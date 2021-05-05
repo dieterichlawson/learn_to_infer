@@ -99,27 +99,47 @@ def log_marginal(x, mus, covs, ws):
   return jscipy.special.logsumexp(log_ps)
 
 
-def plot_gmms(xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-              em_params, algo_num_modes=None):
+def plot_em_comparison(
+    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs, em_params, 
+    algo_num_modes=None):
   true_means, true_covs, true_weights = true_params
   pred_means, pred_covs, pred_weights = pred_params
   em_means, em_covs, em_weights = em_params
+  em_cs, em_means, em_covs, em_weights = [jnp.array(x) for x in [em_cs, em_means, em_covs, em_weights]]
   fig, ax = plt.subplots(nrows=1, ncols=3, sharey=True, figsize=(14, 4))
   plot_gmm_on_ax(ax[0], xs, num_modes, true_cs, true_means, true_covs,
                  true_weights)
   ax[0].set_title("True Clustering")
   if algo_num_modes is None:
-    plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs,
-                   pred_weights)
-    ax[1].set_title("Predicted Clustering")
+    plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs, pred_weights)
     plot_gmm_on_ax(ax[2], xs, num_modes, em_cs, em_means, em_covs, em_weights)
-    ax[2].set_title("EM Clustering")
   else:
-    plot_gmm_on_ax(ax[1], xs, algo_num_modes, pred_cs, pred_means, pred_covs,
-                   pred_weights)
-    ax[1].set_title("Predicted Clustering")
+    plot_gmm_on_ax(ax[1], xs, algo_num_modes, pred_cs, pred_means, pred_covs, pred_weights)
     plot_gmm_on_ax(ax[2], xs, algo_num_modes, em_cs, em_means, em_covs, em_weights)
+    ax[1].set_title("Predicted Clustering")
     ax[2].set_title("EM Clustering")
+  return fig
+
+def plot_em_dpmm_comparison(
+    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs, em_params, dpmm_cs,
+    dpmm_params, algo_num_modes):
+  true_means, true_covs, true_weights = true_params
+  pred_means, pred_covs, pred_weights = pred_params
+  em_means, em_covs, em_weights = em_params
+  em_cs, em_means, em_covs, em_weights = [jnp.array(x) for x in [em_cs, em_means, em_covs, em_weights]]
+  dpmm_means, dpmm_covs, dpmm_weights = dpmm_params
+  dpmm_cs, dpmm_means, dpmm_covs, dpmm_weights = [jnp.array(x) for x in [dpmm_cs, dpmm_means,
+    dpmm_covs, dpmm_weights]]
+  fig, ax = plt.subplots(nrows=1, ncols=4, sharey=True, figsize=(18, 4))
+  plot_gmm_on_ax(ax[0], xs, num_modes, true_cs, true_means, true_covs,
+                 true_weights)
+  ax[0].set_title("True Clustering")
+  plot_gmm_on_ax(ax[1], xs, algo_num_modes, pred_cs, pred_means, pred_covs, pred_weights)
+  ax[1].set_title("Predicted Clustering")
+  plot_gmm_on_ax(ax[2], xs, algo_num_modes, em_cs, em_means, em_covs, em_weights)
+  ax[2].set_title("EM Clustering")
+  plot_gmm_on_ax(ax[3], xs, algo_num_modes, dpmm_cs, dpmm_means, dpmm_covs, dpmm_weights)
+  ax[3].set_title("DPMM Clustering")
   return fig
 
 

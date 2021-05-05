@@ -60,8 +60,6 @@ flags.DEFINE_integer("max_k", 10,
 flags.DEFINE_integer("algo_k", None,
                      "the number of modes used in the algorithms. can differ from k,"
                      " but defaults to k.")
-flags.DEFINE_boolean("fix_em_k", False,
-                     "If true, set EM's num_components to algo_k no matter how many modes.")
 flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
                   "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
@@ -228,10 +226,10 @@ def make_summarize(
     key, subkey = jax.random.split(key)
     xs, cs, ks, _ = sample_eval_batch(subkey)
     if fix_em_k:
-      em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
+      em_metrics, dpmm_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
           xs, cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
     else:
-      em_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
+      em_metrics, dpmm_metrics, _, _ = gmm_eval.compute_masked_baseline_metrics(
           xs, cs, ks, ks*data_points_per_mode)
 
     # EM
@@ -241,6 +239,14 @@ def make_summarize(
     print("em pairwise f1: %0.3f" % em_metrics[1])
     writer.scalar("em/avg_ll", em_metrics[2], step=step)
     print("em avg ll: %0.3f" % em_metrics[2])
+    # DPMM
+    writer.scalar("dpmm/pairwise_acc", dpmm_metrics[0], step=step)
+    print("dpmm pairwise acc: %0.3f" % dpmm_metrics[0])
+    writer.scalar("dpmm/pairwise_f1", dpmm_metrics[1], step=step)
+    print("dpmm pairwise f1: %0.3f" % dpmm_metrics[1])
+    writer.scalar("dpmm/avg_ll", dpmm_metrics[2], step=step)
+    print("dpmm avg ll: %0.3f" % dpmm_metrics[2])
+
     ## Spectral RBF
     #writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
     #print("spectral rbf pairwise acc: %0.3f" % srbf_metrics[0])
@@ -258,13 +264,14 @@ def make_summarize(
     pred_cs = pred_cs[0]
     pred_params = (pred_params[0][0], pred_params[1][0], pred_params[2][0])
     if fix_em_k:
-      em_cs, em_params = plotting.fit_em(xs, algo_k)
-      fig = plotting.plot_gmms(
+      em_cs, em_params = gmm_eval.em_fit_and_predict(xs, algo_k)
+      dpmm_cs, dpmm_params = gmm_eval.dpmm_fit_and_predict(xs, algo_k)
+      fig = plotting.plot_em_dpmm_comparison(
         xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-        em_params, algo_num_modes=algo_k)
+        em_params, dpmm_cs, dpmm_params, algo_k)
     else:
-      em_cs, em_params = plotting.fit_em(xs, num_modes)
-      fig = plotting.plot_gmms(
+      em_cs, em_params = gmm_eval.em_fit_and_predict(xs, num_modes)
+      fig = plotting.plot_em_comparison(
         xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
         em_params)
     plot_img = plotting.plot_to_numpy_image(plt)
@@ -402,8 +409,12 @@ def main(unused_argv):
     FLAGS.max_k = FLAGS.k
 
   if FLAGS.algo_k is None:
+    fix_em_k = False
     FLAGS.algo_k = FLAGS.max_k
-
+  else:
+    assert FLAGS.model_type == "fixed_k", "Fixing algo k only possible with fixed_k model"
+    fix_em_k = True
+    
   if FLAGS.debug_nans:
     config.update("jax_debug_nans", True)
 
@@ -450,7 +461,7 @@ def main(unused_argv):
       min_k=FLAGS.min_k,
       max_k=FLAGS.max_k,
       algo_k=FLAGS.algo_k,
-      fix_em_k=FLAGS.fix_em_k,
+      fix_em_k=fix_em_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,
