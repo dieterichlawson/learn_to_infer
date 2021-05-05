@@ -182,7 +182,7 @@ def sample_gmm(key, mus, covs, w_logits, num_samples):
   return xs, cs
 
 
-def sample_masked_gmm(key, k, max_k, max_num_data_points, params):
+def sample_masked_gmm(key, k, max_k, num_data_points, params):
   """Samples from a Gaussian mixture model, masked for performance.
 
   Args:
@@ -190,16 +190,14 @@ def sample_masked_gmm(key, k, max_k, max_num_data_points, params):
     k: The number of modes.
     max_k: An upper bound on the number of modes. Used for determining the
       shapes of the outputs.
-    max_num_data_points: An upper bound on the number of data points, used
-      to determine the shape of the outputs.
+    num_data_points: The number of data points, used to determine the shape of the outputs.
     params: The parameters of the GMM, a [max_k, data_dim] tensor of mus,
       a [max_k, data_dim, data_dim] tensor of mode covariances, and a
       [max_k] vector of log mixture weights.
   Returns:
-    xs: A [max_num_data_points, data_dim] set of samples from the GMM.
+    xs: A [num_data_points, data_dim] set of samples from the GMM.
       Only the first num_data_points entries are guaranteed to be valid samples.
-    cs: A [max_num_data_points] set of cluster assignments for the sampled data
-      points. Only the first num_data_points entries are guaranteed to be valid.
+    cs: A [num_data_points] set of cluster assignments for the sampled data.
   """
   # log_ws is [max_k]
   # mus is [max_k, data_dim]
@@ -207,8 +205,8 @@ def sample_masked_gmm(key, k, max_k, max_num_data_points, params):
   mus, mode_scales, log_ws = params
   log_ws = jnp.where(jnp.arange(max_k) < k,
                      log_ws,
-                     jnp.ones_like(log_ws)*-jnp.inf)
-  xs, cs = sample_gmm(key, mus, mode_scales, log_ws, max_num_data_points)
+                     jnp.full_like(log_ws, -jnp.inf))
+  xs, cs = sample_gmm(key, mus, mode_scales, log_ws, num_data_points)
   return xs, cs
 
 
@@ -335,7 +333,7 @@ def sample_gmm_mu(key, k, max_k, data_dim, cov, log_weights, dist_mult):
   return mus, covs, log_ws
 
 
-def sample_random_gmm(key, k, max_k, max_num_data_points,
+def sample_random_gmm(key, k, max_k, num_data_points,
                       data_dim, sample_params_fn):
   """Samples data from a GMM with random parameters.
 
@@ -344,17 +342,15 @@ def sample_random_gmm(key, k, max_k, max_num_data_points,
     k: The number of modes.
     max_k: An upper bound on the number of modes. Used for determining the
       shapes of the outputs.
-    max_num_data_points: An upper bound on the number of data points, used
+    num_data_points: An upper bound on the number of data points, used
       to determine the shape of the outputs.
     data_dim: The dimensionality of the data.
     sample_params_fn: A function which returns a sample of the parameters of a
       GMM. Must accept a key, num_modes, max_num_modes, and data_dim and return
       A three-tuple of (mus, covs, and log_ws).
   Returns:
-    xs: A [max_num_data_points, data_dim] set of samples from the GMM.
-      Only the first num_data_points entries are guaranteed to be valid samples.
-    cs: A [max_num_data_points] set of cluster assignments for the sampled data
-      points. Only the first num_data_points entries are guaranteed to be valid.
+    xs: A [num_data_points, data_dim] set of samples from the GMM.
+    cs: A [num_data_points] set of cluster assignments for the sampled data.
     params: A tuple of (mus, covs, log_ws).
       mus: A [max_k, data_dim] set of mixture mode means. Only the first k
         entries are guaranteed to be valid.
@@ -365,12 +361,12 @@ def sample_random_gmm(key, k, max_k, max_num_data_points,
   """
   key1, key2 = jax.random.split(key)
   params = sample_params_fn(key1, k, max_k, data_dim)
-  xs, cs = sample_masked_gmm(key2, k, max_k, max_num_data_points, params)
+  xs, cs = sample_masked_gmm(key2, k, max_k, num_data_points, params)
   return xs, cs, params
 
 
 def sample_random_gmm_batch(
-    key, ks, max_k, max_num_data_points, data_dim, sample_params_fn):
+    key, ks, max_k, num_data_points, data_dim, sample_params_fn):
   """Samples batches of data from GMMs with random parameters.
 
   Args:
@@ -378,19 +374,16 @@ def sample_random_gmm_batch(
     ks: A [batch_size] tensor, the number of modes for each GMM in the batch.
     max_k: An upper bound on the number of modes. Used for determining the
       shapes of the outputs.
-    max_num_data_points: An upper bound on the number of data points, used
-      to determine the shape of the outputs.
+    num_data_points: The number of data points, used to determine the shape of the outputs.
     data_dim: The dimensionality of the data.
     sample_params_fn: A function which returns a sample of the parameters of a
       GMM. Must accept a key, num_modes, max_num_modes, and data_dim and return
       A three-tuple of (mus, covs, and log_ws).
   Returns:
-    xs: A [batch_size, max_num_data_points, data_dim] tensor of samples from the
-      GMMs. Only the first num_data_points[i] entries are guaranteed to be valid
-      samples for the ith batch element.
-    cs: A [batch_size, max_num_data_points] set of cluster assignments for the
-      sampled data points. Only the first num_data_points[i] entries are
-      guaranteed to be valid for the ith batch element.
+    xs: A [batch_size, num_data_points, data_dim] tensor of samples from the
+      GMMs. 
+    cs: A [batch_size, num_data_points] set of cluster assignments for the
+      sampled data points.
     params: A tuple of (mus, covs, log_ws).
       mus: A [batch_size, max_k, data_dim] set of mixture mode means. Only the
         first ks[i] means are guaranteed to be valid for the ith batch element.
@@ -409,13 +402,12 @@ def sample_random_gmm_batch(
   xs, cs = vmap(
       sample_masked_gmm,
       in_axes=(0, 0, None, None, (0, 0, 0)))(
-          jax.random.split(key2, num=ks.shape[0]), ks, max_k,
-          max_num_data_points, params)
+          jax.random.split(key2, num=ks.shape[0]), ks, max_k, num_data_points, params)
   return xs, cs, params
 
 
 def sample_random_gmm_batch_with_k_range(
-    key, batch_size, min_k, max_k, max_num_data_points, data_dim,
+    key, batch_size, min_k, max_k, num_data_points, data_dim,
     sample_params_fn):
   """Sample batches of data from GMMs with num modes in a range of ks."""
 
@@ -423,42 +415,41 @@ def sample_random_gmm_batch_with_k_range(
   ks = jax.random.choice(k1, jnp.arange(min_k, stop=max_k+1),
                          shape=(batch_size,), replace=True)
   xs, cs, params = sample_random_gmm_batch(
-      k2, ks, max_k, max_num_data_points,
-      data_dim, sample_params_fn)
+      k2, ks, max_k, num_data_points, data_dim, sample_params_fn)
   return xs, cs, ks, params
 
 
-def batch_with_random_mu_fixed_ks(key, ks, max_k, max_num_data_points, data_dim,
+def batch_with_random_mu_fixed_ks(key, ks, max_k, num_data_points, data_dim,
                                   cov, log_ws, dist_mult):
 
   def sample_params_fn(key, k, max_k, data_dim):
     return sample_gmm_mu(key, k, max_k, data_dim, cov, log_ws, dist_mult)
 
-  return sample_random_gmm_batch(key, ks, max_k, max_num_data_points, data_dim,
+  return sample_random_gmm_batch(key, ks, max_k, num_data_points, data_dim,
                                  sample_params_fn)
 
 
 def batch_with_random_mu_random_ks(key, batch_size, min_k, max_k,
-                                   max_num_data_points, data_dim, cov, log_ws,
+                                   num_data_points, data_dim, cov, log_ws,
                                    dist_mult):
   k1, k2 = jax.random.split(key)
   ks = jax.random.choice(
       k1, jnp.arange(min_k, stop=max_k + 1), shape=(batch_size,), replace=True)
   xs, cs, params = batch_with_random_mu_fixed_ks(k2, ks, max_k,
-                                                 max_num_data_points, data_dim,
+                                                 num_data_points, data_dim,
                                                  cov, log_ws, dist_mult)
   return xs, cs, ks, params
 
 
-def batch_with_random_mu_cov_fixed_ks(key, ks, max_k, max_num_data_points,
+def batch_with_random_mu_cov_fixed_ks(key, ks, max_k, num_data_points,
                                       data_dim, cov_dof, cov_shape, cov_prior, log_ws,
                                       dist_mult):
 
   def sample_params_fn(key, k, max_k, data_dim):
-    return sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
-                                 log_ws, dist_mult)
+    return sample_gmm_mu_and_cov(
+        key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior, log_ws, dist_mult)
   xs, cs, params = sample_random_gmm_batch(
-      key, ks, max_k, max_num_data_points, data_dim, sample_params_fn)
+      key, ks, max_k, num_data_points, data_dim, sample_params_fn)
 
   scales = vmap(vmap(jnp.linalg.cholesky))(params[1])
   params = (params[0], scales, params[2])
@@ -466,29 +457,29 @@ def batch_with_random_mu_cov_fixed_ks(key, ks, max_k, max_num_data_points,
 
 
 def batch_with_random_mu_cov_random_ks(
-    key, batch_size, min_k, max_k, max_num_data_points, data_dim, cov_dof,
+    key, batch_size, min_k, max_k, num_data_points, data_dim, cov_dof,
     cov_shape, cov_prior, log_ws, dist_mult):
   k1, k2 = jax.random.split(key)
   ks = jax.random.choice(
       k1, jnp.arange(min_k, stop=max_k + 1), shape=(batch_size,), replace=True)
 
   xs, cs, params = batch_with_random_mu_cov_fixed_ks(
-          k2, ks, max_k, max_num_data_points, data_dim, 
+          k2, ks, max_k, num_data_points, data_dim, 
           cov_dof, cov_shape, cov_prior, log_ws, dist_mult)
 
   return xs, cs, ks, params
 
 
-def batch_with_all_random_params_fixed_ks(key, ks, max_k, max_num_data_points,
+def batch_with_all_random_params_fixed_ks(key, ks, max_k, num_data_points,
                                           data_dim, cov_dof, cov_shape, cov_prior,
                                           dist_mult):
 
   def sample_params_fn(key, k, max_k, data_dim):
-    return sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior,
-                                 dist_mult)
+    return sample_all_gmm_params(
+        key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior, dist_mult)
 
-  xs, cs, params = sample_random_gmm_batch(key, ks, max_k, max_num_data_points,
-                                           data_dim, sample_params_fn)
+  xs, cs, params = sample_random_gmm_batch(
+      key, ks, max_k, num_data_points, data_dim, sample_params_fn)
 
   scales = vmap(vmap(jnp.linalg.cholesky))(params[1])
   params = (params[0], scales, params[2])
@@ -496,14 +487,14 @@ def batch_with_all_random_params_fixed_ks(key, ks, max_k, max_num_data_points,
 
 
 def batch_with_all_random_params_random_ks(
-    key, batch_size, min_k, max_k, max_num_data_points, data_dim, cov_dof,
+    key, batch_size, min_k, max_k, num_data_points, data_dim, cov_dof,
     cov_shape, cov_prior, dist_mult):
   k1, k2 = jax.random.split(key)
   ks = jax.random.choice(k1, jnp.arange(min_k, stop=max_k+1),
                          shape=(batch_size,), replace=True)
 
   xs, cs, params = batch_with_all_random_params_fixed_ks(
-      k2, ks, max_k, max_num_data_points, data_dim, cov_dof, cov_shape, cov_prior,
+      k2, ks, max_k, num_data_points, data_dim, cov_dof, cov_shape, cov_prior,
       dist_mult)
 
   return xs, cs, ks, params
@@ -549,19 +540,19 @@ def sample_batch_fixed_ks(
 
 
 def sample_batch_fixed_ks2(
-    key, sampling_type, ks, max_k, max_num_data_points, data_dim,
+    key, sampling_type, ks, max_k, num_data_points, data_dim,
     mode_variance, cov_dof, cov_prior, dist_mult):
   if sampling_type == "mean":
     xs, cs, params = batch_with_random_mu_fixed_ks(
-        key, ks, max_k, max_num_data_points, data_dim,
+        key, ks, max_k, num_data_points, data_dim,
         jnp.eye(data_dim)*mode_variance, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale":
     xs, cs, params = batch_with_random_mu_cov_fixed_ks(
-        key, ks, max_k, max_num_data_points, data_dim,
+        key, ks, max_k, num_data_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, params = batch_with_all_random_params_fixed_ks(
-        key, ks, max_k, max_num_data_points, data_dim,
+        key, ks, max_k, num_data_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, dist_mult)
   return xs, cs, params
 
