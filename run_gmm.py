@@ -418,7 +418,7 @@ def make_logdir(config):
       "_cov_dof_%d"
       "_%s"
       "_dist_%s"
-      "_lr_%0.3f",
+      "_lr_%0.3f"
       "_tpu%s" % (
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
