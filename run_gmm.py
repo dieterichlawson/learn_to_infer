@@ -418,12 +418,13 @@ def make_logdir(config):
       "_cov_dof_%d"
       "_%s"
       "_dist_%s"
+      "_lr_%0.3f",
       "_tpu%s" % (
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
         config.algo_k, config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof, config.normalization, config.dist, config.tag)
+        config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
       )
   return os.path.join(basedir, exp_dir)
 
