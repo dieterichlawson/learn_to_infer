@@ -127,15 +127,28 @@ def compute_metrics(xs, pred_params, true_cs, pred_cs, num_points, ks):
       xs, pred_mus, pred_covs, pred_log_ws, num_points, ks)
   return avg_acc, avg_f1, jnp.mean(pred_log_marginal)
 
-def em_fit_and_predict(xs, num_modes):
-  model = sklearn.mixture.GaussianMixture(
-      n_components=num_modes,
-      covariance_type="full",
-      init_params="kmeans",
-      n_init=1).fit(xs)
+def em_fit_and_predict(xs, num_modes, prob_type, mode_var):
+  if prob_type == "mean_scale_weight":
+    model = sklearn.mixture.GaussianMixture(
+        n_components=num_modes,
+        covariance_type="full",
+        init_params="kmeans",
+        n_init=1).fit(xs)
+  elif prob_type == "mean":
+    model = sklearn.mixture.GaussianMixture(
+        n_components=num_modes,
+        covariance_type="spherical",
+        init_params="kmeans",
+        weights_init=onp.full([num_modes], 1./num_modes),
+        precisions_init=onp.full([num_modes], 1./mode_var),
+        n_init=1).fit(xs)
+  else:
+    assert False, "Wrong problem type in em fit and predict"
+
   preds = model.predict(xs)
   mus = model.means_
-  covs = model.covariances_
+  data_dim = xs.shape[1]
+  covs = onp.array([l*onp.eye(data_dim) for l in model.covariances_])
   log_ws = onp.log(model.weights_)
   return preds, (mus, covs, log_ws)
 
@@ -169,7 +182,7 @@ def compute_model_metrics(xs, cs, pred_cs, pred_params, num_points, num_modes):
   ll = masked_log_marginal_per_x(xs, pred_mus, pred_covs, pred_log_ws, num_points, num_modes)
   return acc, f1, ll
 
-def compute_masked_baseline_metrics(train_xs, train_cs, test_xs, test_cs, num_modes, num_points):
+def compute_masked_baseline_metrics(train_xs, train_cs, test_xs, test_cs, prob_type, mode_var, num_modes, num_points):
   batch_size = train_xs.shape[0]
 
   # EM
@@ -186,8 +199,8 @@ def compute_masked_baseline_metrics(train_xs, train_cs, test_xs, test_cs, num_mo
     train_ci = train_cs[i, :n_i]
     test_xi = test_xs[i, :n_i]
     test_ci = test_cs[i, :n_i]
-
-    train_pred_cs, pred_params = em_fit_and_predict(train_xi, k_i)
+    
+    train_pred_cs, pred_params = em_fit_and_predict(train_xi, k_i, prob_type, mode_var)
     pred_mus, pred_covs, pred_log_ws = pred_params
     test_pred_cs = gmm_models.masked_classify_points(
         test_xi, pred_mus, pred_covs,  pred_log_ws, k_i)

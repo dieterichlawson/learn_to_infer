@@ -239,7 +239,8 @@ def make_summarize(
     #      train_xs, train_cs, test_xs, test_cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
     #else:
     em_metrics = gmm_eval.compute_masked_baseline_metrics(
-          train_xs, train_cs, test_xs, test_cs, ks, ks*data_points_per_mode)
+          train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
+          ks, ks*data_points_per_mode)
 
     # EM
     writer.scalar("em_train/pairwise_acc", em_metrics[0], step=step)
@@ -286,7 +287,8 @@ def make_summarize(
     #    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
     #    em_params, dpmm_cs, dpmm_params, algo_k)
     #else:
-    em_cs, em_params = gmm_eval.em_fit_and_predict(xs, num_modes)
+    em_cs, em_params = gmm_eval.em_fit_and_predict(
+        xs, num_modes, sampling_types[model_name], mode_var)
     fig = plotting.plot_em_comparison(
       xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
       em_params)
