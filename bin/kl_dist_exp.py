@@ -2,7 +2,7 @@ experiment_name = "kl_dist_exp"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
-job_args = {
+hparams = {
   "model_name": "msw_unconditional",
   "data_dim": [2, 8],
   "num_encoders": 4,

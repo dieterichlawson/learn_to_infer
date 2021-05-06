@@ -2,7 +2,7 @@ experiment_name = "high_d_exp"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
-job_args = {
+hparams = {
   "model_name": "mean",
   "data_dim": [16, 32, 64],
   "num_encoders": [2, 4, 6, 10],

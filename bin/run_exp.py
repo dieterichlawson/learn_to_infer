@@ -20,12 +20,23 @@ exp = importlib.import_module(args.exp)
 
 experiment_name = exp.experiment_name
 command = exp.command
-job_args = exp.job_args
+
+if "defaults" in dir(exp):
+  defaults = exp.defaults
+else:
+  defaults = {}
+
+hparams = exp.hparams
+if isinstance(hparams, dict):
+  hparams = [hparams]
+
+assert isinstance(hparams, list), "hparams must be a dictionary or list of dictionaries."
+assert isinstance(defaults, dict), "defaults must be a dictionary."
 
 if args.reinit_tpus is not None:
   args.reinit_tpus = [int(x) for x in args.reinit_tpus.split(",")]
 
-commands = orch.make_commands(command, job_args)
+commands = orch.make_commands(command, *hparams, defaults=defaults)
 
 if args.reinit_tpus is not None and len(args.reinit_tpus) > 0:
   filtered_cmds = [commands[i-1] for i in args.reinit_tpus]

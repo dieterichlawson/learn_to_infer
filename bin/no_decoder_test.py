@@ -2,7 +2,7 @@ experiment_name = "no_decoder_test"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
-job_args = {
+hparams = {
   "model_name": "no_decoder",
   "data_dim": 2,
   "num_encoders": [3, 4],

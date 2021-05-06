@@ -1,7 +1,7 @@
 experiment_name = "lda_perp_exp"
 command = "python3 learn_to_infer/run_lda.py"
 
-job_args = {
+hparams = {
   "model": "topic_word",
   "num_encoders": 2,
   "num_decoders": 2,
