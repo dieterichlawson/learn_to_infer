@@ -134,6 +134,7 @@ def em_fit_and_predict(xs, num_modes, prob_type, mode_var):
         covariance_type="full",
         init_params="kmeans",
         n_init=1).fit(xs)
+    covs = model.covariances_
   elif prob_type == "mean":
     model = sklearn.mixture.GaussianMixture(
         n_components=num_modes,
@@ -142,13 +143,13 @@ def em_fit_and_predict(xs, num_modes, prob_type, mode_var):
         weights_init=onp.full([num_modes], 1./num_modes),
         precisions_init=onp.full([num_modes], 1./mode_var),
         n_init=1).fit(xs)
+    covs = onp.array([l*onp.eye(data_dim) for l in model.covariances_])
   else:
     assert False, "Wrong problem type in em fit and predict"
 
   preds = model.predict(xs)
   mus = model.means_
   data_dim = xs.shape[1]
-  covs = onp.array([l*onp.eye(data_dim) for l in model.covariances_])
   log_ws = onp.log(model.weights_)
   return preds, (mus, covs, log_ws)
 
