@@ -57,9 +57,6 @@ flags.DEFINE_integer("min_k", 2,
                      "The minimum number of modes in the data.")
 flags.DEFINE_integer("max_k", 10,
                      "the maximum number of modes in the data.")
-flags.DEFINE_integer("algo_k", None,
-                     "the number of modes used in the algorithms. can differ from k,"
-                     " but defaults to k.")
 flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
                   "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
@@ -120,6 +117,15 @@ sampling_types = {
  "fixed_k": "mean_scale_weight"
 }
 
+class_dict = {
+      "mean": gmm_models.OriginalMeanInferenceMachine,
+      #"mean_scale": gmm_models.MeanScaleInferenceMachine,
+      "mean_scale_weight": gmm_models.MSWOriginal,
+      "msw_unconditional": gmm_models.MSWUnconditional,
+      "mean_unconditional": gmm_models.UnconditionalMeanInferenceMachine,
+      "fixed_k": gmm_models.UnconditionalFixedK,
+}
+
 def make_model(key,
                model_name="mean",
                num_encoders=4,
@@ -128,22 +134,11 @@ def make_model(key,
                value_dim=128,
                data_points_per_mode=25,
                max_k=10,
-               algo_k=10,
                data_dim=2,
                normalization="no_norm",
                dist="l2"):
-  class_dict = {
-      "mean": gmm_models.OriginalMeanInferenceMachine,
-      #"mean_scale": gmm_models.MeanScaleInferenceMachine,
-      "mean_scale_weight": gmm_models.MSWOriginal,
-      "msw_unconditional": gmm_models.MSWUnconditional,
-      "mean_unconditional": gmm_models.UnconditionalMeanInferenceMachine,
-      "fixed_k": gmm_models.UnconditionalFixedK,
-  }
-
   model = class_dict[model_name](
-      data_dim=data_dim, max_k=max_k, algo_k=algo_k,
-      max_num_data_points=max_k*data_points_per_mode, num_heads=num_heads,
+      data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
       normalization=normalization, dist=dist)
   params = model.init_params(key)
@@ -183,10 +178,8 @@ def make_summarize(
     model_name="mean",
     min_k=2,
     max_k=10,
-    algo_k=10,
-    fix_em_k=False,
     data_points_per_mode=50,
-    test_data_points_per_mode=25,
+    test_data_points_per_mode=[25],
     cov_dof=10,
     cov_prior="inv_wishart",
     dist_mult=2.,
@@ -277,11 +270,6 @@ def make_summarize(
     if step == 0:
       summarize_baselines(writer, step, k2)
 
-  def write_metrics(writer, step, key, metrics):
-    for name, metric in metrics.items():
-      writer.scalar("%s/%s" % (key, name), metric, step=step)
-      print("%s %s: %0.3f" % (key, name, metric))
-
   def plot_params(num_modes, num_data_points, writer, step, params, key):
     outs = sample_and_classify_single_gmm(key, params, num_data_points // num_modes, num_modes)
     xs, true_cs, true_params, pred_cs, pred_params = outs
@@ -298,11 +286,23 @@ def make_summarize(
         plot_img, step=step)
     plt.close(fig)
 
+  def eval_on_different_sized_datasets(writer, step, params, key):
+    for ppm in test_data_points_per_mode:
+      key, k1 = jax.random.split(key)
+      (train_acc, train_f1, train_ll, 
+          test_acc, test_f1, test_ll) = compute_metrics(k1, params, ppm)
+      write_metrics(writer, step, "Transformer train diff dataset sizes",
+          {"pairwise acc %d" % ppm: train_acc, "pairwise f1 %d" % ppm: train_f1, "ll %d" % ppm: train_ll})
+      write_metrics(writer, step, "Transformer test diff dataset sizes",
+          {"pairwise acc %d" % ppm: test_acc, "pairwise f1 %d" % ppm: test_f1, "ll %d" % ppm: test_ll})
+
   def expensive_summarize(writer, step, params, key):
     if data_dim == 2:
       for k in range(min_k, max_k+1):
         plot_params(k, k*data_points_per_mode, writer, step, params, key)
-
+    if test_data_points_per_mode is not None:
+      eval_on_different_sized_datasets(writer, step, params, key)
+  
   return summarize, expensive_summarize
 
 
@@ -317,7 +317,6 @@ def make_logdir(config):
       "_data_dim_%d"
       "_mink_%d"
       "_maxk_%d"
-      "_algo_%d"
       "_dps_per_k_%d"
       "_cov_prior_%s"
       "_cov_dof_%d"
@@ -328,7 +327,7 @@ def make_logdir(config):
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
-        config.algo_k, config.data_points_per_mode, config.cov_prior, 
+        config.data_points_per_mode, config.cov_prior, 
         config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
       )
   return os.path.join(basedir, exp_dir)
@@ -344,13 +343,6 @@ def main(unused_argv):
     FLAGS.min_k = FLAGS.k
     FLAGS.max_k = FLAGS.k
 
-  if FLAGS.algo_k is None:
-    fix_em_k = False
-    FLAGS.algo_k = FLAGS.max_k
-  else:
-    assert FLAGS.model_name == "fixed_k", "Fixing algo k only possible with fixed_k model"
-    fix_em_k = True
-    
   if FLAGS.debug_nans:
     config.update("jax_debug_nans", True)
 
@@ -359,13 +351,8 @@ def main(unused_argv):
     ) == 0, "Device count must evenly divide batch_size"
     FLAGS.batch_size = int(FLAGS.batch_size / jax.local_device_count())
 
-  if FLAGS.plot_sklearn_comparison:
-    assert FLAGS.min_k == 3 and FLAGS.max_k == 3
-
-  if FLAGS.test_data_points_per_mode is None:
-    FLAGS.test_data_points_per_mode = [FLAGS.data_points_per_mode]
-  else:
-    FLAGS.test_data_points_per_mode = [int(x) for x in ",".split(FLAGS.test_data_points_per_mode)]
+  if FLAGS.test_data_points_per_mode is not None:
+    FLAGS.test_data_points_per_mode = [int(x) for x in FLAGS.test_data_points_per_mode.split(",")]
 
   FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
@@ -380,7 +367,6 @@ def main(unused_argv):
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
-      algo_k=FLAGS.algo_k,
       data_dim=FLAGS.data_dim, 
       normalization=FLAGS.normalization,
       dist=FLAGS.dist)
@@ -401,8 +387,6 @@ def main(unused_argv):
       model_name=FLAGS.model_name,
       min_k=FLAGS.min_k,
       max_k=FLAGS.max_k,
-      algo_k=FLAGS.algo_k,
-      fix_em_k=fix_em_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       test_data_points_per_mode=FLAGS.test_data_points_per_mode,
       cov_dof=FLAGS.cov_dof,

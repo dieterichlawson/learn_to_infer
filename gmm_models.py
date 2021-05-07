@@ -146,7 +146,6 @@ class GMMInferenceMachine(object):
                model,
                data_dim=2,
                max_k=2,
-               max_num_data_points=25,
                dist="symm_kl",
                entropy_alpha=0.01):
     """Creates the model.
@@ -155,14 +154,11 @@ class GMMInferenceMachine(object):
       model: The model which accepts data and produces parameters.
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       dist: The name of the distance function to use in computing the loss, selected from the 
         keys of NAMED_DIST_FNS.
       entropy_alpha: The entropy regularization weight used in computing the loss.
     """
     self.model = model
-    self.max_num_data_points = max_num_data_points
     self.data_dim = data_dim
     self.max_k = max_k
     if dist == "symm_kl" or dist == "kl":
@@ -182,9 +178,10 @@ class GMMInferenceMachine(object):
     """
     key, subkey = jax.random.split(key)
     batch_size = 1
+    max_num_data_points = 32
     inputs = jax.random.normal(
-        subkey, [batch_size, self.max_num_data_points, self.data_dim])
-    input_lengths = jnp.full([batch_size], self.max_num_data_points)
+        subkey, [batch_size, max_num_data_points, self.data_dim])
+    input_lengths = jnp.full([batch_size], max_num_data_points)
     ks = jnp.full([batch_size], self.max_k)
     _, params = self.model.init(key, inputs, input_lengths, ks)
     return params
@@ -255,7 +252,6 @@ class MeanInferenceMachine(GMMInferenceMachine):
                model,
                data_dim=2,
                max_k=2,
-               max_num_data_points=25,
                dist=None,
                entropy_alpha=0.01):
     """Creates the model.
@@ -264,14 +260,11 @@ class MeanInferenceMachine(GMMInferenceMachine):
       model: The model which accepts data and produces parameters.
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       dist: Ignored, must be l2_dist for this model.
       entropy_alpha: The entropy regularization weight used in computing the loss.
     """
-    super().__init__(model, data_dim=data_dim, max_k=max_k, 
-        max_num_data_points=max_num_data_points, dist="l2",
-        entropy_alpha=entropy_alpha)
+    super().__init__(
+        model, data_dim=data_dim, max_k=max_k, dist="l2", entropy_alpha=entropy_alpha)
 
   def loss(self, params, inputs, input_lengths, true_params, ks, key):
     """Computes the wasserstein loss for this model.
@@ -349,7 +342,6 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=None,
-               max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
                num_decoders=6,
@@ -364,8 +356,6 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
     Args:
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       num_heads: The number of heads to use in the transformer.
       num_encoders: The number of encoder layers to use in the transformer.
       num_decoders: The number of decoder layers to use in the transformer.
@@ -378,8 +368,7 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
       entropy_alpha: The weight of the entropy regularization in the loss.
     """
     model = transformer.EncoderDecoderTransformer.partial(
-        target_dim=data_dim,
-        max_input_length=max_num_data_points, max_target_length=max_k,
+        target_dim=data_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         normalization=normalization,
@@ -388,7 +377,6 @@ class OriginalMeanInferenceMachine(MeanInferenceMachine):
                model,
                data_dim=data_dim,
                max_k=max_k,
-               max_num_data_points=max_num_data_points,
                dist="l2_dist",
                entropy_alpha=entropy_alpha)
 
@@ -399,7 +387,6 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=None,
-               max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
                num_decoders=6,
@@ -414,8 +401,6 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
     Args:
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       num_heads: The number of heads to use in the transformer.
       num_encoders: The number of encoder layers to use in the transformer.
       num_decoders: The number of decoder layers to use in the transformer.
@@ -428,8 +413,7 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
       entropy_alpha: The weight of the entropy regularization in the loss.
     """
     model = transformer.UnconditionalEncoderDecoderTransformer.partial(
-        target_dim=data_dim,
-        max_input_length=max_num_data_points, max_target_length=max_k,
+        target_dim=data_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         normalization=normalization,
@@ -438,7 +422,6 @@ class UnconditionalMeanInferenceMachine(MeanInferenceMachine):
                model,
                data_dim=data_dim,
                max_k=max_k,
-               max_num_data_points=max_num_data_points,
                dist="l2",
                entropy_alpha=entropy_alpha)
 
@@ -532,7 +515,6 @@ class MSWOriginal(MeanScaleWeightInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=None,
-               max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
                num_decoders=6,
@@ -547,8 +529,6 @@ class MSWOriginal(MeanScaleWeightInferenceMachine):
     Args:
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       num_heads: The number of heads to use in the transformer.
       num_encoders: The number of encoder layers to use in the transformer.
       num_decoders: The number of decoder layers to use in the transformer.
@@ -562,14 +542,12 @@ class MSWOriginal(MeanScaleWeightInferenceMachine):
     """
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
     model = transformer.EncoderDecoderTransformer.partial(
-        target_dim=target_dim,
-        max_input_length=max_num_data_points, max_target_length=max_k,
+        target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
     super().__init__(
         model, data_dim=data_dim, max_k=max_k, 
-        max_num_data_points=max_num_data_points,
         dist=dist, entropy_alpha=entropy_alpha)
 
 
@@ -580,7 +558,6 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=None,
-               max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
                num_decoders=6,
@@ -595,8 +572,6 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
     Args:
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       num_heads: The number of heads to use in the transformer.
       num_encoders: The number of encoder layers to use in the transformer.
       num_decoders: The number of decoder layers to use in the transformer.
@@ -610,14 +585,12 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
     """
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
     model = transformer.UnconditionalEncoderDecoderTransformer.partial(
-        target_dim=target_dim,
-        max_input_length=max_num_data_points, max_target_length=max_k,
+        target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
     super().__init__(
         model, data_dim=data_dim, max_k=max_k, 
-        max_num_data_points=max_num_data_points,
         dist=dist, entropy_alpha=entropy_alpha)
 
 
@@ -629,12 +602,11 @@ class FixedKInferenceMachine(MeanScaleWeightInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=2,
-               max_num_data_points=25,
                dist="symm_kl",
                entropy_alpha=0.01):
     self.algo_k = algo_k
-    super().__init__(model, data_dim=data_dim, max_k=max_k,
-        max_num_data_points=max_num_data_points, dist=dist, entropy_alpha=entropy_alpha)
+    super().__init__(
+        model, data_dim=data_dim, max_k=max_k, dist=dist, entropy_alpha=entropy_alpha)
 
 
   def loss(self, params, inputs, input_lengths, true_params, ks, key):
@@ -686,7 +658,6 @@ class UnconditionalFixedK(FixedKInferenceMachine):
                data_dim=2,
                max_k=2,
                algo_k=2,
-               max_num_data_points=25,
                num_heads=8,
                num_encoders=6,
                num_decoders=6,
@@ -701,8 +672,6 @@ class UnconditionalFixedK(FixedKInferenceMachine):
     Args:
       data_dim: The dimensionality of the data points to be fed in.
       max_k: The maximum number of clusters that could occur in the data.
-      max_num_data_points: The maximum number of data points that could be
-        fed in at one time.
       num_heads: The number of heads to use in the transformer.
       num_encoders: The number of encoder layers to use in the transformer.
       num_decoders: The number of decoder layers to use in the transformer.
@@ -716,13 +685,11 @@ class UnconditionalFixedK(FixedKInferenceMachine):
     """
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
     model = transformer.UnconditionalEncoderDecoderTransformer.partial(
-        target_dim=target_dim,
-        max_input_length=max_num_data_points, max_target_length=algo_k,
+        target_dim=target_dim, max_target_length=algo_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
     super().__init__(
         model, data_dim=data_dim, max_k=max_k, algo_k=algo_k,
-        max_num_data_points=max_num_data_points,
         dist=dist, entropy_alpha=entropy_alpha)
 

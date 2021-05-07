@@ -234,7 +234,6 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
             target_lengths,
             targets=None,
             target_dim=32,
-            max_input_length=100,
             max_target_length=100,
             num_heads=8,
             num_encoders=6,
@@ -252,8 +251,6 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
       target_lengths: Unused.
       targets: Unused.
       target_dim: The length of each output vector.
-      max_input_length: An int at least as large as the largest element of
-        num_data_points, used for determining output shapes.
       max_target_length: An int at least as large as the largest element of
         target_lengths, used for determining output shapes.
       num_heads: The number of heads for the self attention.
@@ -267,6 +264,7 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
         [batch_size, max_target_length, target_dim].
     """
     batch_size = inputs.shape[0]
+    max_input_length = inputs.shape[1]
     input_mask = util.make_mask(input_lengths, max_input_length)
 
     encoder_hs = TransformerEncoderStack(inputs,
@@ -313,7 +311,6 @@ class EncoderDecoderTransformer(nn.Module):
             target_lengths,
             targets=None,
             target_dim=32,
-            max_input_length=100,
             max_target_length=100,
             num_heads=8,
             num_encoders=6,
@@ -334,8 +331,6 @@ class EncoderDecoderTransformer(nn.Module):
         during training. If None, then the transformer's own outputs are fed
         back in.
       target_dim: The length of each output vector.
-      max_input_length: An int at least as large as the largest element of
-        num_data_points, used for determining output shapes.
       max_target_length: An int at least as large as the largest element of
         target_lengths, used for determining output shapes.
       num_heads: The number of heads for the self attention.
@@ -348,6 +343,7 @@ class EncoderDecoderTransformer(nn.Module):
       outs: The transformer output, a tensor of shape
         [batch_size, max_target_length, target_dim].
     """
+    max_input_length = inputs.shape[1]
     input_mask = util.make_mask(input_lengths, max_input_length)
     target_mask = util.make_mask(target_lengths, max_target_length)
 
