@@ -25,7 +25,16 @@ defaults = {
 
 hparams = [
  { "data_dim": 2, "cov_dof": 4, "data_points_per_mode": 50, "k": [2, 4, 8, 16]},
- { "data_dim": 4, "cov_dof": 6, "data_points_per_mode": 88, "k": [2, 4, 8, 16]},
- { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": [2, 4, 8, 16]},
- { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": [2, 4, 8, 16]}
+ 
+ { "data_dim": 4, "cov_dof": 6, "data_points_per_mode": 88, "k": [2, 4, 8]},
+ { "data_dim": 4, "cov_dof": 6, "data_points_per_mode": 88, "k": 16, "eval_batch_size": 64},
+
+ { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": [2, 4]},
+ { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": 8, "eval_batch_size": 64},
+ { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": 16, "batch_size": 64, "eval_batch_size": 16},
+
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 2},
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 4, "eval_batch_size":64},
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 8, "eval_batch_size":16},
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 200, "k": 16, "batch_size": 8, "eval_batch_size": 4}
 ]
