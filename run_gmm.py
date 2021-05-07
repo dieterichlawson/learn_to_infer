@@ -64,6 +64,9 @@ flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
                   "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
                      "Number of data points to include per mode in the data.")
+flags.DEFINE_string("test_data_points_per_mode", None,
+                     "Number of data points per mode in the test data, defaults to"
+                     " data_points_per_mode.")
 flags.DEFINE_integer("cov_dof", None,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_enum("cov_prior", "inv_wishart",
@@ -182,7 +185,8 @@ def make_summarize(
     max_k=10,
     algo_k=10,
     fix_em_k=False,
-    data_points_per_mode=25,
+    data_points_per_mode=50,
+    test_data_points_per_mode=25,
     cov_dof=10,
     cov_prior="inv_wishart",
     dist_mult=2.,
@@ -190,103 +194,99 @@ def make_summarize(
     mode_var=1.,
     eval_batch_size=256):
 
-  def sample_eval_batch(key):
+  def sample_eval_batch(key, points_per_mode):
     xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
         key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-        2 * max_k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
-    train_xs = xs[:, :max_k * data_points_per_mode]
-    test_xs = xs[:, max_k * data_points_per_mode:]
-    train_cs = cs[:, :max_k * data_points_per_mode]
-    test_cs = cs[:, max_k * data_points_per_mode:]
+        2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+    train_xs = xs[:, :max_k * points_per_mode]
+    test_xs = xs[:, max_k * points_per_mode:]
+    train_cs = cs[:, :max_k * points_per_mode]
+    test_cs = cs[:, max_k * points_per_mode:]
     return train_xs, test_xs, train_cs, test_cs, ks, params
 
-  sample_eval_batch = jax.jit(sample_eval_batch)
+  sample_eval_batch = jax.jit(sample_eval_batch, static_argnums=(1,))
 
-  def sample_single_gmm(key, num_modes):
+  def sample_single_gmm(key, points_per_mode, num_modes):
     xs, cs, params = sample_gmm.sample_batch_fixed_ks(
         key, sampling_types[model_name], jnp.array([num_modes]), max_k, 
-        max_k*data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+        max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
 
     return xs[0], cs[0], (params[0][0], params[1][0], params[2][0])
 
-  def model_classify(params, inputs, ks):
+  def model_classify(params, inputs, ks, points_per_mode):
     return gmm_models.classify_with_defaults(
-        model, params, inputs, eval_batch_size, ks*data_points_per_mode, ks,
+        model, params, inputs, eval_batch_size, ks*points_per_mode, ks,
         max_k, jnp.eye(data_dim)*mode_var)
 
-  def sample_and_classify_eval_batch(key, params):
-    train_xs, test_xs, train_cs, test_cs, ks, true_gmm_params = sample_eval_batch(key)
-    tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks)
+  def sample_and_classify_eval_batch(key, params, points_per_mode):
+    train_xs, test_xs, train_cs, test_cs, ks, true_gmm_params = sample_eval_batch(key,
+        points_per_mode)
+    tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks, points_per_mode)
     tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
             test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
     return (train_xs, test_xs, tfmr_train_cs, train_cs, tfmr_test_cs, test_cs, ks, 
             true_gmm_params, tfmr_gmm_params)
 
-  def sample_and_classify_single_gmm(key, params, num_modes):
-    xs, cs, gmm_params = sample_single_gmm(key, num_modes)
+  def sample_and_classify_single_gmm(key, params, points_per_mode, num_modes):
+    xs, cs, gmm_params = sample_single_gmm(key, points_per_mode, num_modes)
     tfmr_cs, tfmr_gmm_params = model_classify(
-        params, xs[jnp.newaxis], jnp.array([num_modes]))
+        params, xs[jnp.newaxis], jnp.array([num_modes]), points_per_mode)
     return xs, cs, gmm_params, tfmr_cs, tfmr_gmm_params
 
-  sample_and_classify_single_gmm = jax.jit(sample_and_classify_single_gmm)
-  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch)
+  sample_and_classify_single_gmm = jax.jit(sample_and_classify_single_gmm, static_argnums=(2,))
+  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch, static_argnums=(2,))
+
+  def write_metrics(writer, step, key, metrics):
+    for name, metric in metrics.items():
+      writer.scalar("%s/%s" % (key, name), metric, step=step)
+      print("%s %s: %0.3f" % (key, name, metric))
 
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
-    train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(subkey)
-    #if fix_em_k:
-    #  em_metrics, _, _, _ = gmm_eval.compute_masked_baseline_metrics(
-    #      train_xs, train_cs, test_xs, test_cs, jnp.full_like(ks, algo_k), ks*data_points_per_mode)
-    #else:
+    train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(subkey, data_points_per_mode)
     em_metrics = gmm_eval.compute_masked_baseline_metrics(
           train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
           ks, ks*data_points_per_mode)
+    write_metrics(writer, step, "EM train",
+        dict(zip(["pairwise acc", "pairwise f1", "ll"], em_metrics[:3])))
+    write_metrics(writer, step, "EM test",
+        dict(zip(["pairwise acc", "pairwise f1", "ll"], em_metrics[3:])))
+  
+  def compute_metrics(key, params, points_per_mode):
+    (train_xs, test_xs, 
+     tfmr_train_cs, train_cs, 
+     tfmr_test_cs, test_cs, 
+     ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params,
+         points_per_mode)
+    train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
+        train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*points_per_mode, ks)
+    test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
+        test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*points_per_mode, ks)
+    return train_acc, train_f1, train_log_marginal, test_acc, test_f1, test_log_marginal
 
-    # EM
-    writer.scalar("em_train/pairwise_acc", em_metrics[0], step=step)
-    print("em train pairwise acc: %0.3f" % em_metrics[0])
-    writer.scalar("em_train/pairwise_f1", em_metrics[1], step=step)
-    print("em train pairwise f1: %0.3f" % em_metrics[1])
-    writer.scalar("em_train/avg_ll", em_metrics[2], step=step)
-    print("em train avg ll: %0.3f" % em_metrics[2])
-    writer.scalar("em_test/pairwise_acc", em_metrics[3], step=step)
-    print("em test pairwise acc: %0.3f" % em_metrics[3])
-    writer.scalar("em_test/pairwise_f1", em_metrics[4], step=step)
-    print("em test pairwise f1: %0.3f" % em_metrics[4])
-    writer.scalar("em_test/avg_ll", em_metrics[5], step=step)
-    print("em test avg ll: %0.3f" % em_metrics[5])
+  compute_metrics = jax.jit(compute_metrics, static_argnums=(2,))
 
-    ## DPMM
-    #writer.scalar("dpmm/pairwise_acc", dpmm_metrics[0], step=step)
-    #print("dpmm pairwise acc: %0.3f" % dpmm_metrics[0])
-    #writer.scalar("dpmm/pairwise_f1", dpmm_metrics[1], step=step)
-    #print("dpmm pairwise f1: %0.3f" % dpmm_metrics[1])
-    #writer.scalar("dpmm/avg_ll", dpmm_metrics[2], step=step)
-    #print("dpmm avg ll: %0.3f" % dpmm_metrics[2])
+  def summarize(writer, step, params, key):
+    k1, k2 = jax.random.split(key)
+    (train_acc, train_f1, train_ll, 
+        test_acc, test_f1, test_ll) = compute_metrics(k1, params, data_points_per_mode)
+    write_metrics(writer, step, "Transformer train",
+        {"pairwise acc": train_acc, "pairwise f1": train_f1, "ll": train_ll})
+    write_metrics(writer, step, "Transformer test",
+        {"pairwise acc": test_acc, "pairwise f1": test_f1, "ll": test_ll})
+    if step == 0:
+      summarize_baselines(writer, step, k2)
 
-    ## Spectral RBF
-    #writer.scalar("spectral_rbf/pairwise_acc", srbf_metrics[0], step=step)
-    #print("spectral rbf pairwise acc: %0.3f" % srbf_metrics[0])
-    #writer.scalar("spectral_rbf/pairwise_f1", srbf_metrics[1], step=step)
-    #print("spectral rbf pairwise f1: %0.3f" % srbf_metrics[1])
-    ## Agglomerative Clustering
-    #writer.scalar("agglomerative/pairwise_acc", agg_metrics[0], step=step)
-    #print("agglomerative pairwise acc: %0.3f" % agg_metrics[0])
-    #writer.scalar("agglomerative/pairwise_f1", agg_metrics[1], step=step)
-    #print("agglomerative pairwise f1: %0.3f" % agg_metrics[1])
+  def write_metrics(writer, step, key, metrics):
+    for name, metric in metrics.items():
+      writer.scalar("%s/%s" % (key, name), metric, step=step)
+      print("%s %s: %0.3f" % (key, name, metric))
 
   def plot_params(num_modes, num_data_points, writer, step, params, key):
-    outs = sample_and_classify_single_gmm(key, params, num_modes)
+    outs = sample_and_classify_single_gmm(key, params, num_data_points // num_modes, num_modes)
     xs, true_cs, true_params, pred_cs, pred_params = outs
     pred_cs = pred_cs[0]
     pred_params = (pred_params[0][0], pred_params[1][0], pred_params[2][0])
-    #if fix_em_k:
-    #  em_cs, em_params = gmm_eval.em_fit_and_predict(xs, algo_k)
-    #  dpmm_cs, dpmm_params = gmm_eval.dpmm_fit_and_predict(xs, algo_k)
-    #  fig = plotting.plot_em_dpmm_comparison(
-    #    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs,
-    #    em_params, dpmm_cs, dpmm_params, algo_k)
-    #else:
     em_cs, em_params = gmm_eval.em_fit_and_predict(
         xs, num_modes, sampling_types[model_name], mode_var)
     fig = plotting.plot_em_comparison(
@@ -298,107 +298,10 @@ def make_summarize(
         plot_img, step=step)
     plt.close(fig)
 
-  def comparison_inference(params):
-    datasets = plotting.make_comparison_gmm_datasets()
-    varied_inputs, aniso_inputs, blob_inputs, no_structure_inputs = datasets
-    varied_inputs = varied_inputs[0][jnp.newaxis, Ellipsis]
-    aniso_inputs = aniso_inputs[0][jnp.newaxis, Ellipsis]
-    blob_inputs = blob_inputs[0][jnp.newaxis, Ellipsis]
-    no_structure_inputs = no_structure_inputs[0][jnp.newaxis, Ellipsis]
-
-    new_model = gmm_models.MeanScaleWeightInferenceMachine(
-        data_dim=data_dim, max_k=max_k,
-        max_num_data_points=1500, num_heads=FLAGS.num_heads,
-        num_encoders=FLAGS.num_encoders, num_decoders=FLAGS.num_decoders,
-        qkv_dim=FLAGS.value_dim_per_head*FLAGS.num_heads)
-    varied_cs, varied_params = new_model.classify(
-        params, varied_inputs, jnp.array([1500]), jnp.array([3]))
-    aniso_cs, aniso_params = new_model.classify(
-        params, aniso_inputs, jnp.array([1500]), jnp.array([3]))
-    blob_cs, blob_params = new_model.classify(
-        params, blob_inputs, jnp.array([1500]), jnp.array([3]))
-    no_structure_cs, no_structure_params = new_model.classify(
-        params, no_structure_inputs, jnp.array([1500]), jnp.array([3]))
-    varied_cs = varied_cs[0]
-    aniso_cs = aniso_cs[0]
-    blob_cs = blob_cs[0]
-    no_structure_cs = no_structure_cs[0]
-    varied_params = (varied_params[0][0], varied_params[1][0],
-                     varied_params[2][0])
-    aniso_params = (aniso_params[0][0], aniso_params[1][0], aniso_params[2][0])
-    blob_params = (blob_params[0][0], blob_params[1][0], blob_params[2][0])
-    no_structure_params = (no_structure_params[0][0], no_structure_params[1][0],
-                           no_structure_params[2][0])
-    return (varied_inputs, aniso_inputs, blob_inputs, no_structure_inputs,
-            varied_cs, aniso_cs, blob_cs, no_structure_cs,
-            varied_params, aniso_params, blob_params, no_structure_params)
-
-  comparison_inference = jax.jit(comparison_inference)
-
-  def plot_comparisons(writer, step, params):
-    outs = comparison_inference(params)
-    varied_inputs, aniso_inputs, blob_inputs, no_structure_inputs = outs[:4]
-    varied_cs, aniso_cs, blob_cs, no_structure_cs = outs[4:8]
-    varied_params, aniso_params, blob_params, no_structure_params = outs[8:]
-    fig = plotting.plot_comparison_gmm(varied_inputs[0], varied_inputs[1],
-                                       varied_cs, varied_params)
-    plot_image = plotting.plot_to_numpy_image(plt)
-    writer.image("varied", plot_image, step=step)
-    plt.close(fig)
-    fig = plotting.plot_comparison_gmm(aniso_inputs[0], aniso_inputs[1],
-                                       aniso_cs, aniso_params)
-    writer.image("aniso", plotting.plot_to_numpy_image(plt), step=step)
-    plt.close(fig)
-    fig = plotting.plot_comparison_gmm(blob_inputs[0], blob_inputs[1], blob_cs,
-                                       blob_params)
-    writer.image("blob", plotting.plot_to_numpy_image(plt), step=step)
-    plt.close(fig)
-    fig = plotting.plot_comparison_gmm(no_structure_inputs[0],
-                                       no_structure_inputs[1], no_structure_cs,
-                                       no_structure_params)
-    writer.image("no_structure", plotting.plot_to_numpy_image(plt), step=step)
-    plt.close(fig)
-
-  def compute_metrics(key, params):
-    (train_xs, test_xs, 
-     tfmr_train_cs, train_cs, 
-     tfmr_test_cs, test_cs, 
-     ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params)
-    train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
-        train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*data_points_per_mode, ks)
-    test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
-        test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
-    return train_acc, train_f1, train_log_marginal, test_acc, test_f1, test_log_marginal
-
-  compute_metrics = jax.jit(compute_metrics)
-
-  def summarize(writer, step, params, key):
-    k1, k2 = jax.random.split(key)
-    (train_acc, train_f1, train_log_marginal, 
-        test_acc, test_f1, test_log_marginal) = compute_metrics(k1, params)
-    writer.scalar("transformer_train/pairwise_acc", train_acc, step=step)
-    print("Transformer train pairwise accuracy: %0.3f" % train_acc)
-    writer.scalar("transformer_train/pairwise_f1", train_f1, step=step)
-    print("Transformer train pairwise f1: %0.3f" % train_f1)
-    writer.scalar("transformer_train/log_marginal", train_log_marginal, step=step)
-    print("Transformer train log marginal: %0.3f" % train_log_marginal)
-
-    writer.scalar("transformer_test/pairwise_acc", test_acc, step=step)
-    print("Transformer test pairwise accuracy: %0.3f" % test_acc)
-    writer.scalar("transformer_test/pairwise_f1", test_f1, step=step)
-    print("Transformer test pairwise f1: %0.3f" % test_f1)
-    writer.scalar("transformer_test/log_marginal", test_log_marginal, step=step)
-    print("Transformer test log marginal: %0.3f" % test_log_marginal)
-
-    if step == 0:
-      summarize_baselines(writer, step, k2)
-
   def expensive_summarize(writer, step, params, key):
     if data_dim == 2:
       for k in range(min_k, max_k+1):
         plot_params(k, k*data_points_per_mode, writer, step, params, key)
-      if FLAGS.plot_sklearn_comparison:
-        plot_comparisons(writer, step, params)
 
   return summarize, expensive_summarize
 
@@ -459,6 +362,11 @@ def main(unused_argv):
   if FLAGS.plot_sklearn_comparison:
     assert FLAGS.min_k == 3 and FLAGS.max_k == 3
 
+  if FLAGS.test_data_points_per_mode is None:
+    FLAGS.test_data_points_per_mode = [FLAGS.data_points_per_mode]
+  else:
+    FLAGS.test_data_points_per_mode = [int(x) for x in ",".split(FLAGS.test_data_points_per_mode)]
+
   FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
   key = jax.random.PRNGKey(0)
@@ -496,6 +404,7 @@ def main(unused_argv):
       algo_k=FLAGS.algo_k,
       fix_em_k=fix_em_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
+      test_data_points_per_mode=FLAGS.test_data_points_per_mode,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,
       dist_mult=FLAGS.dist_multiplier,

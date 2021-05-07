@@ -128,6 +128,7 @@ def compute_metrics(xs, pred_params, true_cs, pred_cs, num_points, ks):
   return avg_acc, avg_f1, jnp.mean(pred_log_marginal)
 
 def em_fit_and_predict(xs, num_modes, prob_type, mode_var):
+  data_dim = xs.shape[1]
   if prob_type == "mean_scale_weight":
     model = sklearn.mixture.GaussianMixture(
         n_components=num_modes,
@@ -149,7 +150,6 @@ def em_fit_and_predict(xs, num_modes, prob_type, mode_var):
 
   preds = model.predict(xs)
   mus = model.means_
-  data_dim = xs.shape[1]
   log_ws = onp.log(model.weights_)
   return preds, (mus, covs, log_ws)
 
