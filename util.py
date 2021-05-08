@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import re
 import itertools
 from functools import partial
 import os
@@ -494,3 +494,15 @@ def make_mask(lengths, max_length):
   mask = jnp.tile(mask[jnp.newaxis, :], [batch_size, 1])
   mask = mask < lengths[Ellipsis, jnp.newaxis]
   return mask
+
+def parse_int_list(str_list):
+  strs = str_list.split(",")
+  outs = []
+  for s in strs:
+    if re.fullmatch("\d*-\d*", s) is not None:
+      i1, i2 = s.split("-")
+      outs.extend(list(range(int(i1), int(i2)+1)))
+    elif re.fullmatch("\d*", s) is not None:
+      outs.append(int(s))
+  return outs
+

@@ -1,6 +1,11 @@
 import orchestration as orch
 import argparse
 import importlib
+import sys
+import os
+# add parent directory to python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import util
 
 parser = argparse.ArgumentParser(description='Run L2I experiments.')
 
@@ -34,7 +39,7 @@ assert isinstance(hparams, list), "hparams must be a dictionary or list of dicti
 assert isinstance(defaults, dict), "defaults must be a dictionary."
 
 if args.reinit_tpus is not None:
-  args.reinit_tpus = [int(x) for x in args.reinit_tpus.split(",")]
+  args.reinit_tpus = util.parse_int_list(args.reinit_tpus)
 
 commands = orch.make_commands(command, *hparams, defaults=defaults)
 
