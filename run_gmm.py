@@ -21,6 +21,7 @@ import sample_gmm
 import gmm_eval
 import gmm_models
 import plotting
+import util
 import train
 
 from absl import app
@@ -64,6 +65,8 @@ flags.DEFINE_integer("data_points_per_mode", 25,
 flags.DEFINE_string("test_data_points_per_mode", None,
                      "Number of data points per mode in the test data, defaults to"
                      " data_points_per_mode.")
+flags.DEFINE_string("test_ks", None,
+                     "Ks to test model performance on.")
 flags.DEFINE_integer("cov_dof", None,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_enum("cov_prior", "inv_wishart",
@@ -179,7 +182,8 @@ def make_summarize(
     min_k=2,
     max_k=10,
     data_points_per_mode=50,
-    test_data_points_per_mode=[25],
+    test_data_points_per_mode=None,
+    test_ks=None,
     cov_dof=10,
     cov_prior="inv_wishart",
     dist_mult=2.,
@@ -187,17 +191,23 @@ def make_summarize(
     mode_var=1.,
     eval_batch_size=256):
 
-  def sample_eval_batch(key, points_per_mode):
-    xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
-        key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-        2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+  def sample_eval_batch(key, points_per_mode, min_k, max_k):
+    if min_k != max_k:
+      xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
+          key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
+          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+    else:
+      ks = jnp.full([eval_batch_size], max_k)
+      xs, cs, params = sample_gmm.sample_batch_fixed_ks(
+        key, sampling_types[model_name], ks, max_k, 2 * max_k * points_per_mode, 
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
     train_xs = xs[:, :max_k * points_per_mode]
     test_xs = xs[:, max_k * points_per_mode:]
     train_cs = cs[:, :max_k * points_per_mode]
     test_cs = cs[:, max_k * points_per_mode:]
     return train_xs, test_xs, train_cs, test_cs, ks, params
 
-  sample_eval_batch = jax.jit(sample_eval_batch, static_argnums=(1,))
+  sample_eval_batch = jax.jit(sample_eval_batch, static_argnums=(1,2,3))
 
   def sample_single_gmm(key, points_per_mode, num_modes):
     xs, cs, params = sample_gmm.sample_batch_fixed_ks(
@@ -211,15 +221,15 @@ def make_summarize(
         model, params, inputs, eval_batch_size, ks*points_per_mode, ks,
         max_k, jnp.eye(data_dim)*mode_var)
 
-  def sample_and_classify_eval_batch(key, params, points_per_mode):
+  def sample_and_classify_eval_batch(key, params, points_per_mode, min_k, max_k):
     train_xs, test_xs, train_cs, test_cs, ks, true_gmm_params = sample_eval_batch(key,
-        points_per_mode)
+        points_per_mode, min_k, max_k)
     tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks, points_per_mode)
     tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
             test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
     return (train_xs, test_xs, tfmr_train_cs, train_cs, tfmr_test_cs, test_cs, ks, 
             true_gmm_params, tfmr_gmm_params)
-
+  
   def sample_and_classify_single_gmm(key, params, points_per_mode, num_modes):
     xs, cs, gmm_params = sample_single_gmm(key, points_per_mode, num_modes)
     tfmr_cs, tfmr_gmm_params = model_classify(
@@ -227,7 +237,7 @@ def make_summarize(
     return xs, cs, gmm_params, tfmr_cs, tfmr_gmm_params
 
   sample_and_classify_single_gmm = jax.jit(sample_and_classify_single_gmm, static_argnums=(2,))
-  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch, static_argnums=(2,))
+  sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch, static_argnums=(2,3,4))
 
   def write_metrics(writer, step, key, metrics):
     for name, metric in metrics.items():
@@ -236,7 +246,8 @@ def make_summarize(
 
   def summarize_baselines(writer, step, key):
     key, subkey = jax.random.split(key)
-    train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(subkey, data_points_per_mode)
+    train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(subkey, data_points_per_mode,
+        min_k, max_k)
     em_metrics = gmm_eval.compute_masked_baseline_metrics(
           train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
           ks, ks*data_points_per_mode)
@@ -245,24 +256,24 @@ def make_summarize(
     write_metrics(writer, step, "EM test",
         dict(zip(["pairwise acc", "pairwise f1", "ll"], em_metrics[3:])))
   
-  def compute_metrics(key, params, points_per_mode):
+  def compute_metrics(key, params, points_per_mode, min_k, max_k):
     (train_xs, test_xs, 
      tfmr_train_cs, train_cs, 
      tfmr_test_cs, test_cs, 
      ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params,
-         points_per_mode)
+         points_per_mode, min_k, max_k)
     train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
         train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*points_per_mode, ks)
     test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*points_per_mode, ks)
     return train_acc, train_f1, train_log_marginal, test_acc, test_f1, test_log_marginal
 
-  compute_metrics = jax.jit(compute_metrics, static_argnums=(2,))
+  compute_metrics = jax.jit(compute_metrics, static_argnums=(2, 3, 4))
 
   def summarize(writer, step, params, key):
     k1, k2 = jax.random.split(key)
     (train_acc, train_f1, train_ll, 
-        test_acc, test_f1, test_ll) = compute_metrics(k1, params, data_points_per_mode)
+        test_acc, test_f1, test_ll) = compute_metrics(k1, params, data_points_per_mode, min_k, max_k)
     write_metrics(writer, step, "Transformer train",
         {"pairwise acc": train_acc, "pairwise f1": train_f1, "ll": train_ll})
     write_metrics(writer, step, "Transformer test",
@@ -290,11 +301,21 @@ def make_summarize(
     for ppm in test_data_points_per_mode:
       key, k1 = jax.random.split(key)
       (train_acc, train_f1, train_ll, 
-          test_acc, test_f1, test_ll) = compute_metrics(k1, params, ppm)
+          test_acc, test_f1, test_ll) = compute_metrics(k1, params, ppm, min_k, max_k)
       write_metrics(writer, step, "Transformer train diff dataset sizes",
           {"pairwise acc %d" % ppm: train_acc, "pairwise f1 %d" % ppm: train_f1, "ll %d" % ppm: train_ll})
       write_metrics(writer, step, "Transformer test diff dataset sizes",
           {"pairwise acc %d" % ppm: test_acc, "pairwise f1 %d" % ppm: test_f1, "ll %d" % ppm: test_ll})
+
+  def eval_on_different_ks(writer, step, params, key):
+    for k in test_ks:
+      key, k1 = jax.random.split(key)
+      (train_acc, train_f1, train_ll, 
+          test_acc, test_f1, test_ll) = compute_metrics(k1, params, data_points_per_mode, k, k)
+      write_metrics(writer, step, "Transformer train diff ks",
+          {"pairwise acc %d" % k: train_acc, "pairwise f1 %d" % k: train_f1, "ll %d" % k: train_ll})
+      write_metrics(writer, step, "Transformer test diff ks",
+          {"pairwise acc %d" % k: test_acc, "pairwise f1 %d" % k: test_f1, "ll %d" % k: test_ll})
 
   def expensive_summarize(writer, step, params, key):
     if data_dim == 2:
@@ -302,7 +323,9 @@ def make_summarize(
         plot_params(k, k*data_points_per_mode, writer, step, params, key)
     if test_data_points_per_mode is not None:
       eval_on_different_sized_datasets(writer, step, params, key)
-  
+    if test_ks is not None:
+      eval_on_different_ks(writer, step, params, key)
+
   return summarize, expensive_summarize
 
 
@@ -352,7 +375,13 @@ def main(unused_argv):
     FLAGS.batch_size = int(FLAGS.batch_size / jax.local_device_count())
 
   if FLAGS.test_data_points_per_mode is not None:
-    FLAGS.test_data_points_per_mode = [int(x) for x in FLAGS.test_data_points_per_mode.split(",")]
+    FLAGS.test_data_points_per_mode = util.parse_int_list(FLAGS.test_data_points_per_mode)
+
+  if FLAGS.test_ks is not None:
+    FLAGS.test_ks = util.parse_int_list(FLAGS.test_ks)
+    eval_max_k = max(max(FLAGS.test_ks), FLAGS.max_k)
+  else:
+    eval_max_k = FLAGS.max_k
 
   FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
@@ -382,13 +411,26 @@ def main(unused_argv):
       mode_var=FLAGS.mode_var,
       data_dim=FLAGS.data_dim,
       batch_size=FLAGS.batch_size)
+  eval_model, _= make_model(
+      key,
+      model_name=FLAGS.model_name,
+      num_encoders=FLAGS.num_encoders,
+      num_decoders=FLAGS.num_decoders,
+      num_heads=FLAGS.num_heads,
+      value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
+      data_points_per_mode=FLAGS.data_points_per_mode,
+      max_k=eval_max_k,
+      data_dim=FLAGS.data_dim, 
+      normalization=FLAGS.normalization,
+      dist=FLAGS.dist)
   summarize_fn, expensive_summarize_fn = make_summarize(
-      model,
+      eval_model,
       model_name=FLAGS.model_name,
       min_k=FLAGS.min_k,
-      max_k=FLAGS.max_k,
+      max_k=eval_max_k,
       data_points_per_mode=FLAGS.data_points_per_mode,
       test_data_points_per_mode=FLAGS.test_data_points_per_mode,
+      test_ks=FLAGS.test_ks,
       cov_dof=FLAGS.cov_dof,
       cov_prior=FLAGS.cov_prior,
       dist_mult=FLAGS.dist_multiplier,

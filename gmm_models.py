@@ -182,7 +182,7 @@ class GMMInferenceMachine(object):
     inputs = jax.random.normal(
         subkey, [batch_size, max_num_data_points, self.data_dim])
     input_lengths = jnp.full([batch_size], max_num_data_points)
-    ks = jnp.full([batch_size], self.max_k)
+    ks = jnp.full([batch_size], 2)
     _, params = self.model.init(key, inputs, input_lengths, ks)
     return params
 

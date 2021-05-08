@@ -309,7 +309,6 @@ class EncoderDecoderTransformer(nn.Module):
             inputs,
             input_lengths,
             target_lengths,
-            targets=None,
             target_dim=32,
             max_target_length=100,
             num_heads=8,
@@ -355,11 +354,6 @@ class EncoderDecoderTransformer(nn.Module):
                                          normalization=normalization,
                                          weight_init=weight_init)
     batch_size = inputs.shape[0]
-    if targets is not None:
-      sampling = False
-    else:
-      sampling = True
-      targets = jnp.zeros([batch_size, max_target_length, target_dim])
 
     target_inputs = jnp.zeros([batch_size, max_target_length, target_dim])
     target_inputs = target_inputs.at[:, 0, 0].set(target_lengths)
@@ -388,11 +382,7 @@ class EncoderDecoderTransformer(nn.Module):
           features=target_dim,
           kernel_init=weight_init)
 
-      if sampling:
-        target_inputs = target_inputs.at[:, i + 1].set(out)
-      else:
-        target_inputs = target_inputs.at[:, i + 1].set(targets[:, i])
-
+      target_inputs = target_inputs.at[:, i + 1].set(out)
       return target_inputs, out
 
     if self.is_initializing():
@@ -400,7 +390,7 @@ class EncoderDecoderTransformer(nn.Module):
 
     _, outs = jax.lax.scan(
         decode_body,
-        target_inputs,
+        jnp.zeros([batch_size, max_target_length, target_dim]),
         jnp.arange(max_target_length),
     )
     # outs is currently [max_target_length, batch_size, target_dim],
