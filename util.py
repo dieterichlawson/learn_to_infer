@@ -345,6 +345,9 @@ def sinkhorn(C, log_w_p, log_w_q, key, alpha=0.01):
     cost: The optimal cost
     log_pi: The log of the transport plan.
   """
+  #hcb.id_print(C, what="C:")
+  #hcb.id_print(log_w_p, what="log_w_p")
+  #hcb.id_print(log_w_p, what="log_w_q")
   def sinkhorn_step(a, nu):
     log_w_p, log_w_q, C = a
     pre_lambda = jscipy.special.logsumexp(
@@ -455,7 +458,7 @@ def masked_sinkhorn_with_dist(
                             log_w_q, q_num_atoms, q_max_atoms, key, alpha=alpha)
 
 def simple_masked_sinkhorn_with_dist(
-    p_locs, log_w_p, q_locs, log_w_q, dist,num_atoms, max_atoms, key, alpha=0.01):
+    p_locs, log_w_p, q_locs, log_w_q, dist, num_atoms, max_atoms, key, alpha=0.01):
   """Computes the OT distance between two masked atomic measures using 'dist' to compare atoms.
   Args:
     p_locs: The locations of the atoms of p, a tensor of shape [max_length, data_dim].

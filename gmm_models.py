@@ -452,6 +452,8 @@ class MeanScaleWeightInferenceMachine(GMMInferenceMachine):
     """
     batch_size = inputs.shape[0]
     true_means, true_scales, true_log_weights = true_params
+
+    true_log_weights = jnp.nan_to_num(true_log_weights, neginf=0.)
     flat_true_params = vmap(flatten_gmm_params)(true_means, true_scales, true_log_weights)
     preds = self.model.call(params, inputs, input_lengths, ks)
 
