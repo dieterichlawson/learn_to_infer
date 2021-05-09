@@ -358,29 +358,22 @@ class EncoderDecoderTransformer(nn.Module):
     target_inputs = jnp.zeros([batch_size, max_target_length, target_dim])
     target_inputs = target_inputs.at[:, 0, 0].set(target_lengths)
 
+    decoder_stack = TransformerDecoderStack.shared(
+        activation_fn=flax.nn.relu, num_decoders=num_decoders,
+        num_heads=num_heads, value_dim=qkv_dim,
+        normalization=normalization, weight_init=weight_init)
+
+    dense_1 = flax.nn.Dense.shared(features=qkv_dim, kernel_init=weight_init)
+    dense_2 = flax.nn.Dense.shared(features=target_dim, kernel_init=weight_init)
+
     def decode_body(target_inputs, i):
       # decoder_out is [batch_size, max_target_length, value_dim]
-      decoder_out = TransformerDecoderStack(target_inputs,
-                                            target_mask,
-                                            encoder_hs,
-                                            input_mask,
-                                            activation_fn=flax.nn.relu,
-                                            num_decoders=num_decoders,
-                                            num_heads=num_heads,
-                                            value_dim=qkv_dim,
-                                            normalization=normalization,
-                                            weight_init=weight_init)
+      decoder_out = decoder_stack(target_inputs, target_mask, encoder_hs, input_mask)
+
       # out is [batch_size, qkv_dim]
-      out = activation_fn(
-          flax.nn.Dense(
-              decoder_out[:, i],
-              features=qkv_dim,
-              kernel_init=weight_init))
+      out = activation_fn(dense_1(decoder_out[:, i]))
       # dense layer to arrive at [batch_size, target_dim]
-      out = flax.nn.Dense(
-          out,
-          features=target_dim,
-          kernel_init=weight_init)
+      out = dense_2(out)
 
       target_inputs = target_inputs.at[:, i + 1].set(out)
       return target_inputs, out
