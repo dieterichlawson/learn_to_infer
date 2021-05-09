@@ -318,9 +318,9 @@ def make_summarize(
           {"pairwise acc %d" % k: test_acc, "pairwise f1 %d" % k: test_f1, "ll %d" % k: test_ll})
 
   def expensive_summarize(writer, step, params, key):
-    if data_dim == 2:
-      for k in range(min_k, max_k+1):
-        plot_params(k, k*data_points_per_mode, writer, step, params, key)
+    #if data_dim == 2:
+      #for k in range(min_k, max_k+1):
+        #plot_params(k, k*data_points_per_mode, writer, step, params, key)
     if test_data_points_per_mode is not None:
       eval_on_different_sized_datasets(writer, step, params, key)
     if test_ks is not None:
