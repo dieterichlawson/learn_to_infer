@@ -36,5 +36,5 @@ hparams = [
  { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 2},
  { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 4, "eval_batch_size":64},
  { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 8, "eval_batch_size":16},
- { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 200, "k": 16, "batch_size": 8, "eval_batch_size": 4}
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 200, "k": 16, "batch_size": 8, "eval_batch_size": 1}
 ]

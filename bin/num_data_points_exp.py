@@ -33,12 +33,24 @@ hparams = [
     {
       "data_points_per_mode":25, 
       "test_data_points_per_mode":"12,50,200", 
-      "data_dim": [2,4,8]
+      "data_dim": [2,4]
+    },
+    {
+      "data_points_per_mode":25, 
+      "test_data_points_per_mode":"12,50,200", 
+      "data_dim": 8,
+      "eval_batch_size": 128
     },
     {
       "data_points_per_mode":50, 
       "test_data_points_per_mode":"12,50,200", 
-      "data_dim": [2,4,8]
+      "data_dim": [2,4]
+    },
+    {
+      "data_points_per_mode":50, 
+      "test_data_points_per_mode":"12,50,200", 
+      "data_dim": 8,
+      "eval_batch_size": 128,
     },
     {
       "data_points_per_mode":100, 
