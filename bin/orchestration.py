@@ -80,6 +80,7 @@ def reinit_tpus(basename, tpu_nums, dry_run):
   os.system("echo '%s' | parallel %s --jobs %d "
       " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
       " -- \"tmux kill-server;"
+      " pkill -f learn_to_infer\/run_gmm.py ;"
       " rm -r -f learn_to_infer"
       " && git clone https://github.com/dieterichlawson/learn_to_infer.git"
       " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
