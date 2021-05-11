@@ -6,6 +6,16 @@ import shlex
 
 from multiprocessing.pool import ThreadPool
 
+def load_exp_hparams(module):
+  if "defaults" in dir(module):
+    defaults = module.defaults
+  else:
+    defaults = {}
+  hparams = module.hparams
+  if isinstance(hparams, dict):
+    hparams = [hparams]
+  return make_hyperparam_dicts(*hparams, defaults=defaults)
+
 def make_commands(command, *hyperparam_groups, defaults={}):
   hyperparam_dicts = make_hyperparam_dicts(*hyperparam_groups, defaults=defaults)
   param_strings = [" ".join(["--%s={%s}" % (k,k) for k in x.keys()]) for x in hyperparam_dicts]

@@ -260,4 +260,4 @@ def compute_masked_baseline_metrics(train_xs, train_cs, test_xs, test_cs, prob_t
   #agg_avg_acc = agg_acc_tot / batch_size
   #agg_avg_f1 = agg_f1_tot / batch_size
 
-  return (em_train_acc, em_train_f1, em_train_ll, em_test_acc, em_test_f1, em_test_ll)
+  return (em_train_acc, em_test_acc, em_train_f1, em_test_f1, em_train_ll, em_test_ll)
