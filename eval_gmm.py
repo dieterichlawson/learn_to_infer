@@ -50,6 +50,8 @@ flags.DEFINE_integer("cov_dof", None,
                      "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_integer("eval_batch_size", 256,
                      "The batch size for evaluation.")
+flags.DEFINE_integer("num_batches", 8,
+                     "The number of batches to split eval_batch_size up into.")
 flags.DEFINE_string("logdir", "/tmp/transformer",
                     "The directory to put summaries and checkpoints.")
 
@@ -151,6 +153,39 @@ def eval_model(
       tfmr_train_ll, tfmr_test_ll)
   return tfmr_metrics, em_metrics
 
+
+def eval_model_in_batches(
+  key,
+  model,
+  params,
+  model_name,
+  min_k,
+  max_k,
+  data_points_per_mode,
+  cov_dof,
+  cov_prior,
+  dist_mult,
+  data_dim,
+  mode_var,
+  eval_batch_size,
+  num_batches):
+ 
+  assert eval_batch_size % num_batches == 0
+
+  tfmr_metrics = np.zeros([6])
+  em_metrics = np.zeros([6])
+  for i in range(num_batches):
+    key, k1 = jax.random.split(key)
+    tfmr_ms, em_ms = eval_model(k1, model, params, model_name, min_k, max_k, 
+        data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
+        eval_batch_size // num_batches)
+    tfmr_metrics += tfmr_ms
+    em_ms += em_ms
+
+  return tfmr_metrics / num_batches, em_metrics / num_batches
+
+  
+
 def print_tables(vals, num_digits=2):
 
   def make_table(em_or_tfmr, index, include_ddim=True):
@@ -239,7 +274,7 @@ def main(unused_argv):
   for config in configs:
     model, params = load_model(config)
     key, k1 = jax.random.split(key)
-    metrics[config.data_dim][config.min_k] = eval_model(k1, model, params,
+    metrics[config.data_dim][config.min_k] = eval_model_in_batches(k1, model, params,
         config.model_name,
         config.min_k,
         config.max_k,
@@ -249,7 +284,8 @@ def main(unused_argv):
         config.dist_multiplier,
         config.data_dim,
         config.mode_var,
-        FLAGS.eval_batch_size)
+        FLAGS.eval_batch_size,
+        FLAGS.num_batches)
   print_tables(metrics, metrics)
 
 
