@@ -198,7 +198,7 @@ def eval_em_in_batches(
  
   assert eval_batch_size % num_batches == 0
 
-  tfmr_metrics = onp.zeros([6])
+  em_metrics = onp.zeros([6])
 
   for i in range(num_batches):
     key, k1 = jax.random.split(key)
@@ -222,7 +222,7 @@ def print_tables(metrics, em_metrics, eval_data_points=[12, 25, 50, 100, 200]):
         table.append(row)
       em_row = ["EM"]
       for eval_dppm in eval_data_points:
-        em_row.append(metrics[data_dim][eval_dppm][i])
+        em_row.append(em_metrics[data_dim][eval_dppm][i])
       table.append(em_row)
       print(tabulate(table, 
         headers=["Train DPPM", "Test DPPM: 12", "25", "50", "100", "200"]))
@@ -287,7 +287,9 @@ def main(unused_argv):
   em_metrics = defaultdict(dict)
   for data_dim in [2, 4, 8]:
     for dppm in FLAGS.eval_points_per_mode:
+      key, k1 = jax.random.split(key)
       em_metrics[data_dim][dppm] = eval_em_in_batches(
+          k1,
           config.min_k, 
           config.max_k, 
           dppm,
