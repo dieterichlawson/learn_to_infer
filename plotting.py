@@ -18,8 +18,6 @@
 from functools import partial
 import io
 
-import ring_dist
-
 import jax
 from jax import vmap
 import jax.numpy as jnp
@@ -142,31 +140,6 @@ def plot_em_dpmm_comparison(
   ax[3].set_title("DPMM Clustering")
   return fig
 
-
-def plot_rings(xs, num_modes, true_cs, true_params, pred_cs, pred_params):
-  true_r_means, true_r_scales, true_centers, true_log_weights = true_params
-  pred_r_means, pred_r_scales, pred_centers, pred_log_weights = pred_params
-  fig, ax = plt.subplots(nrows=1, ncols=2, sharey=True, figsize=(10, 4))
-
-  @partial(jnp.vectorize, signature="(2)->()")
-  def true_log_p(x):
-    return ring_dist.ring_mixture_log_p(x, true_r_means, true_r_scales,
-                                        true_centers, true_log_weights)
-
-  @partial(jnp.vectorize, signature="(2)->()")
-  def pred_log_p(x):
-    return ring_dist.ring_mixture_log_p(x, pred_r_means, pred_r_scales,
-                                        pred_centers, pred_log_weights)
-
-  plot_density_and_points_on_ax(ax[0], xs, num_modes, true_cs,
-                                true_centers, true_log_p)
-  ax[0].set_title("True Clustering")
-  plot_density_and_points_on_ax(ax[1], xs, num_modes, pred_cs,
-                                pred_centers, pred_log_p)
-  ax[1].set_title("Predicted Clustering")
-  return fig
-
-
 def plot_points_on_ax(ax, xs, num_modes, cs, means):
 
   for i in range(num_modes):
@@ -258,21 +231,5 @@ def plot_comparison_gmm(xs, true_cs, pred_cs, pred_params):
   plot_points_on_ax(ax[0], xs, 3, true_cs, None)
   ax[0].set_title("True Clustering")
   plot_gmm_on_ax(ax[1], xs, 3, pred_cs, pred_means, pred_covs, pred_weights)
-  ax[1].set_title("Predicted Clustering")
-  return fig
-
-
-def plot_comparison_rings(xs, true_cs, pred_cs, pred_params):
-  r_means, r_scales, centers, log_weights = pred_params
-  fig, ax = plt.subplots(nrows=1, ncols=2, sharey=True, figsize=(10, 4))
-  plot_points_on_ax(ax[0], xs, 3, true_cs, None)
-  ax[0].set_title("True Clustering")
-
-  @partial(jnp.vectorize, signature="(2)->()")
-  def pred_log_p(x):
-    return ring_dist.ring_mixture_log_p(
-        x, r_means, r_scales, centers, log_weights)
-
-  plot_density_and_points_on_ax(ax[1], xs, 2, pred_cs, centers, pred_log_p)
   ax[1].set_title("Predicted Clustering")
   return fig
