@@ -35,6 +35,7 @@ from absl import flags
 import jax
 from jax.config import config
 import jax.numpy as jnp
+import numpy as onp
 
 import scipy as oscipy
 import matplotlib.pyplot as plt
@@ -172,10 +173,12 @@ def eval_model_in_batches(
  
   assert eval_batch_size % num_batches == 0
 
-  tfmr_metrics = np.zeros([6])
-  em_metrics = np.zeros([6])
+  tfmr_metrics = onp.zeros([6])
+  em_metrics = onp.zeros([6])
+
   for i in range(num_batches):
     key, k1 = jax.random.split(key)
+
     tfmr_ms, em_ms = eval_model(k1, model, params, model_name, min_k, max_k, 
         data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
         eval_batch_size // num_batches)
