@@ -148,13 +148,11 @@ def eval_model_in_batches(
   for i in range(num_batches):
     key, k1 = jax.random.split(key)
 
-    tfmr_ms, em_ms = eval_model(k1, model, params, model_name, min_k, max_k, 
+    tfmr_metrics += eval_model(k1, model, params, model_name, min_k, max_k, 
         data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
         eval_batch_size // num_batches)
-    tfmr_metrics += tfmr_ms
-    em_ms += em_ms
 
-  return tfmr_metrics / num_batches, em_metrics / num_batches
+  return tfmr_metrics / num_batches
 
 def print_tables(metrics, eval_data_points=[12, 25, 50, 100, 200]):
   for data_dim in [2, 4, 8]:
