@@ -44,8 +44,6 @@ import matplotlib.pyplot as plt
 
 flags.DEFINE_string("exp", None, "Experiment to evaluate.")
 flags.DEFINE_string("eval_points_per_mode", None, "List of numbers of points per mode to eval.")
-#flags.DEFINE_integer("eval_batch_size", 256,
-#                     "The batch size for evaluation.")
 flags.DEFINE_integer("num_batches", 8,
                      "The number of batches to split eval_batch_size up into.")
 
@@ -86,15 +84,10 @@ def eval_model(
   eval_batch_size):
 
   def sample_eval_batch(key, points_per_mode, min_k, max_k):
-    if min_k != max_k:
-      xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
-          key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
-    else:
-      ks = jnp.full([eval_batch_size], max_k)
-      xs, cs, params = sample_gmm.sample_batch_fixed_ks(
-        key, sampling_types[model_name], ks, max_k, 2 * max_k * points_per_mode, 
-        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+    ks = jnp.full([eval_batch_size], max_k)
+    xs, cs, params = sample_gmm.sample_batch_fixed_ks(
+      key, "mean_scale_weight", ks, max_k, 2 * max_k * points_per_mode, 
+      data_dim, mode_var, cov_dof, cov_prior, dist_mult)
     train_xs = xs[:, :max_k * points_per_mode]
     test_xs = xs[:, max_k * points_per_mode:]
     train_cs = cs[:, :max_k * points_per_mode]
@@ -123,7 +116,7 @@ def eval_model(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
   tfmr_metrics = (tfmr_train_acc, tfmr_test_acc, tfmr_train_f1, tfmr_test_f1, 
       tfmr_train_ll, tfmr_test_ll)
-  return tfmr_metrics#, em_metrics
+  return tfmr_metrics
 
 def eval_model_in_batches(
   key,
@@ -154,7 +147,69 @@ def eval_model_in_batches(
 
   return tfmr_metrics / num_batches
 
-def print_tables(metrics, eval_data_points=[12, 25, 50, 100, 200]):
+def eval_em(
+  key,
+  min_k,
+  max_k,
+  data_points_per_mode,
+  cov_dof,
+  cov_prior,
+  dist_mult,
+  data_dim,
+  mode_var,
+  eval_batch_size):
+
+  def sample_eval_batch(key, points_per_mode, min_k, max_k):
+    ks = jnp.full([eval_batch_size], max_k)
+    xs, cs, params = sample_gmm.sample_batch_fixed_ks(
+      key, "mean_scale_weight", ks, max_k, 2 * max_k * points_per_mode, 
+      data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+    train_xs = xs[:, :max_k * points_per_mode]
+    test_xs = xs[:, max_k * points_per_mode:]
+    train_cs = cs[:, :max_k * points_per_mode]
+    test_cs = cs[:, max_k * points_per_mode:]
+    return train_xs, test_xs, train_cs, test_cs, ks, params
+
+  def model_classify(params, inputs, ks, points_per_mode):
+    return gmm_models.classify_with_defaults(
+        model, params, inputs, eval_batch_size, ks*points_per_mode, ks,
+        max_k, jnp.eye(data_dim)*mode_var)
+
+  train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(
+      key, data_points_per_mode, min_k, max_k)
+
+  em_metrics = gmm_eval.compute_masked_baseline_metrics(
+      train_xs, train_cs, test_xs, test_cs, "mean_scale_weight", mode_var, 
+      ks, ks*data_points_per_mode)
+  return em_metrics
+
+def eval_em_in_batches(
+  key,
+  min_k,
+  max_k,
+  data_points_per_mode,
+  cov_dof,
+  cov_prior,
+  dist_mult,
+  data_dim,
+  mode_var,
+  eval_batch_size,
+  num_batches):
+ 
+  assert eval_batch_size % num_batches == 0
+
+  tfmr_metrics = onp.zeros([6])
+
+  for i in range(num_batches):
+    key, k1 = jax.random.split(key)
+
+    em_metrics += eval_em(k1, min_k, max_k, data_points_per_mode, cov_dof, cov_prior, 
+        dist_mult, data_dim, mode_var, eval_batch_size // num_batches)
+
+  return em_metrics / num_batches
+
+
+def print_tables(metrics, em_metrics, eval_data_points=[12, 25, 50, 100, 200]):
   for data_dim in [2, 4, 8]:
     print("Data dim %d" % data_dim)
     for i, metric_name in enumerate(METRICS):
@@ -165,6 +220,10 @@ def print_tables(metrics, eval_data_points=[12, 25, 50, 100, 200]):
         for eval_dppm in eval_data_points:
           row.append(metrics[data_dim][train_dppm][eval_dppm][i])
         table.append(row)
+      em_row = ["EM"]
+      for eval_dppm in eval_data_points:
+        em_row.append(metrics[data_dim][eval_dppm][i])
+      table.append(em_row)
       print(tabulate(table, 
         headers=["Train DPPM", "Test DPPM: 12", "25", "50", "100", "200"]))
 
@@ -203,7 +262,8 @@ def main(unused_argv):
     FLAGS.eval_points_per_mode = util.parse_int_list(FLAGS.eval_points_per_mode)
   else:
     FLAGS.eval_points_per_mode = list(set([c.data_points_per_mode for c in configs]))
-  
+ 
+  print("Evaluating Transformer models")
   for config in configs:
     model, params = load_model(config)
     metrics[config.data_dim][config.data_points_per_mode] = {}
@@ -222,7 +282,24 @@ def main(unused_argv):
           config.mode_var,
           FLAGS.eval_batch_size,
           FLAGS.num_batches)
-  print_tables(metrics)
+
+  print("Evaluating EM...")
+  em_metrics = defaultdict(dict)
+  for data_dim in [2, 4, 8]:
+    for dppm in FLAGS.eval_points_per_mode:
+      em_metrics[data_dim][dppm] = eval_em_in_batches(
+          config.min_k, 
+          config.max_k, 
+          dppm,
+          config.cov_dof, 
+          config.cov_prior, 
+          config.dist_multiplier, 
+          config.data_dim,
+          config.mode_var, 
+          FLAGS.eval_batch_size, 
+          FLAGS.num_batches)
+
+  print_tables(metrics, em_metrics)
 
 if __name__ == "__main__":
   app.run(main)
