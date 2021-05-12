@@ -166,7 +166,7 @@ def print_tables(metrics, eval_data_points=[12, 25, 50, 100, 200]):
           row.append(metrics[data_dim][train_dppm][eval_dppm][i])
         table.append(row)
       print(tabulate(table, 
-        headers=["Train DPPM", "Eval DPPM=12", "25", "50", "100", "200"]))
+        headers=["Train DPPM", "Test DPPM: 12", "25", "50", "100", "200"]))
 
 def normalize_configs(cs):
   for i, c in enumerate(cs):
