@@ -345,6 +345,7 @@ def sinkhorn(C, log_w_p, log_w_q, key, alpha=0.01):
     cost: The optimal cost
     log_pi: The log of the transport plan.
   """
+  C = jnp.nan_to_num(C, posinf=1e10)
   #hcb.id_print(C, what="C:")
   #hcb.id_print(log_w_p, what="log_w_p")
   #hcb.id_print(log_w_p, what="log_w_q")
