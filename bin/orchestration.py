@@ -96,6 +96,16 @@ def reinit_tpus(basename, tpu_nums, dry_run):
       " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
         tpu_num_string, dry_run_string, len(tpu_nums), basename))
 
+def stop_tpus(basename, tpu_nums, dry_run):
+  allow_ssh(dry_run)
+  dry_run_string = "--dry-run" if dry_run else ""
+  tpu_num_string = "\n".join([str(x) for x in tpu_nums])
+  print("Stopping TPU computation...")
+  os.system("echo '%s' | parallel %s --jobs %d "
+      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+      " -- \"tmux kill-server;  pkill -f learn_to_infer\/run_gmm.py\"'" % (
+        tpu_num_string, dry_run_string, len(tpu_nums), basename))
+
 def wait_till_tpus_up(basename, num_tpus, max_retries=3):
 
   def check_tpu(tpu_num):
