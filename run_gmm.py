@@ -252,9 +252,9 @@ def make_summarize(
           train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
           ks, ks*data_points_per_mode)
     write_metrics(writer, step, "EM train",
-        dict(zip(["pairwise acc", "pairwise f1", "ll"], em_metrics[:3])))
+        {"pairwise acc": em_metrics[0], "pairwise f1": em_metrics[2], "ll": em_metrics[4]})
     write_metrics(writer, step, "EM test",
-        dict(zip(["pairwise acc", "pairwise f1", "ll"], em_metrics[3:])))
+        {"pairwise acc": em_metrics[1], "pairwise f1": em_metrics[3], "ll": em_metrics[5]})
   
   def compute_metrics(key, params, points_per_mode, min_k, max_k):
     (train_xs, test_xs, 
@@ -262,9 +262,9 @@ def make_summarize(
      tfmr_test_cs, test_cs, 
      ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params,
          points_per_mode, min_k, max_k)
-    train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
+    train_acc, train_f1, train_log_marginal = gmm_eval.batch_metrics(
         train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*points_per_mode, ks)
-    test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
+    test_acc, test_f1, test_log_marginal = gmm_eval.batch_metrics(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*points_per_mode, ks)
     return train_acc, train_f1, train_log_marginal, test_acc, test_f1, test_log_marginal
 
@@ -297,34 +297,10 @@ def make_summarize(
         plot_img, step=step)
     plt.close(fig)
 
-  def eval_on_different_sized_datasets(writer, step, params, key):
-    for ppm in test_data_points_per_mode:
-      key, k1 = jax.random.split(key)
-      (train_acc, train_f1, train_ll, 
-          test_acc, test_f1, test_ll) = compute_metrics(k1, params, ppm, min_k, max_k)
-      write_metrics(writer, step, "Transformer train diff dataset sizes",
-          {"pairwise acc %d" % ppm: train_acc, "pairwise f1 %d" % ppm: train_f1, "ll %d" % ppm: train_ll})
-      write_metrics(writer, step, "Transformer test diff dataset sizes",
-          {"pairwise acc %d" % ppm: test_acc, "pairwise f1 %d" % ppm: test_f1, "ll %d" % ppm: test_ll})
-
-  def eval_on_different_ks(writer, step, params, key):
-    for k in test_ks:
-      key, k1 = jax.random.split(key)
-      (train_acc, train_f1, train_ll, 
-          test_acc, test_f1, test_ll) = compute_metrics(k1, params, data_points_per_mode, k, k)
-      write_metrics(writer, step, "Transformer train diff ks",
-          {"pairwise acc %d" % k: train_acc, "pairwise f1 %d" % k: train_f1, "ll %d" % k: train_ll})
-      write_metrics(writer, step, "Transformer test diff ks",
-          {"pairwise acc %d" % k: test_acc, "pairwise f1 %d" % k: test_f1, "ll %d" % k: test_ll})
-
   def expensive_summarize(writer, step, params, key):
-    #if data_dim == 2:
-      #for k in range(min_k, max_k+1):
-        #plot_params(k, k*data_points_per_mode, writer, step, params, key)
-    if test_data_points_per_mode is not None:
-      eval_on_different_sized_datasets(writer, step, params, key)
-    if test_ks is not None:
-      eval_on_different_ks(writer, step, params, key)
+    if data_dim == 2:
+      for k in range(min_k, max_k+1):
+        plot_params(k, k*data_points_per_mode, writer, step, params, key)
 
   return summarize, expensive_summarize
 

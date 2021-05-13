@@ -102,17 +102,13 @@ def eval_model(
   train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(
       key, data_points_per_mode, min_k, max_k)
 
-  #em_metrics = gmm_eval.compute_masked_baseline_metrics(
-  #    train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
-  #    ks, ks*data_points_per_mode)
-  
   tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks, data_points_per_mode)
   tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
             test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
 
-  tfmr_train_acc, tfmr_train_f1, tfmr_train_ll = gmm_eval.compute_metrics(
+  tfmr_train_acc, tfmr_train_f1, tfmr_train_ll = gmm_eval.batch_metrics(
         train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*data_points_per_mode, ks)
-  tfmr_test_acc, tfmr_test_f1, tfmr_test_ll = gmm_eval.compute_metrics(
+  tfmr_test_acc, tfmr_test_f1, tfmr_test_ll = gmm_eval.batch_metrics(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
   tfmr_metrics = (tfmr_train_acc, tfmr_test_acc, tfmr_train_f1, tfmr_test_f1, 
       tfmr_train_ll, tfmr_test_ll)

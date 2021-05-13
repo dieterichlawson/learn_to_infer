@@ -123,18 +123,6 @@ def eval_model(
   
   sample_and_classify_eval_batch = jax.jit(sample_and_classify_eval_batch, static_argnums=(2,3,4))
 
-  def compute_metrics(key, params, points_per_mode, min_k, max_k):
-    (train_xs, test_xs, 
-     tfmr_train_cs, train_cs, 
-     tfmr_test_cs, test_cs, 
-     ks, true_gmm_params, tfmr_gmm_params) = sample_and_classify_eval_batch(key, params,
-         points_per_mode, min_k, max_k)
-    train_acc, train_f1, train_log_marginal = gmm_eval.compute_metrics(
-        train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*points_per_mode, ks)
-    test_acc, test_f1, test_log_marginal = gmm_eval.compute_metrics(
-        test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*points_per_mode, ks)
-    return train_acc, test_acc, train_f1, test_f1, train_log_marginal, test_log_marginal
-
   train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(
       key, data_points_per_mode, min_k, max_k)
 
@@ -146,9 +134,9 @@ def eval_model(
   tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
             test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
 
-  tfmr_train_acc, tfmr_train_f1, tfmr_train_ll = gmm_eval.compute_metrics(
+  tfmr_train_acc, tfmr_train_f1, tfmr_train_ll = gmm_eval.batch_metrics(
         train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*data_points_per_mode, ks)
-  tfmr_test_acc, tfmr_test_f1, tfmr_test_ll = gmm_eval.compute_metrics(
+  tfmr_test_acc, tfmr_test_f1, tfmr_test_ll = gmm_eval.batch_metrics(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
   tfmr_metrics = (tfmr_train_acc, tfmr_test_acc, tfmr_train_f1, tfmr_test_f1, 
       tfmr_train_ll, tfmr_test_ll)
