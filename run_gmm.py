@@ -287,6 +287,7 @@ def make_logdir(config):
       "_data_dim_%d"
       "_mink_%d"
       "_maxk_%d"
+      "_nsy_%0.2f"
       "_dps_per_k_%d"
       "_cov_prior_%s"
       "_cov_dof_%d"
@@ -297,6 +298,7 @@ def make_logdir(config):
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
+        config.noise_pct or 0.,
         config.data_points_per_mode, config.cov_prior, 
         config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
       )
