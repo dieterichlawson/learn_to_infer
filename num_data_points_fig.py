@@ -225,7 +225,7 @@ def print_tables(metrics, em_metrics, eval_data_points=[12, 25, 50, 100, 200]):
         em_row.append(em_metrics[data_dim][eval_dppm][i])
       table.append(em_row)
       print(tabulate(table, 
-        headers=["Train DPPM", "Test DPPM: 12", "25", "50", "100", "200"]))
+        headers=["Train DPPM", "Eval DPPM: 12", "25", "50", "100", "200"]))
 
 def normalize_configs(cs):
   for i, c in enumerate(cs):
@@ -296,7 +296,7 @@ def main(unused_argv):
           config.cov_dof, 
           config.cov_prior, 
           config.dist_multiplier, 
-          config.data_dim,
+          data_dim,
           config.mode_var, 
           FLAGS.eval_batch_size, 
           FLAGS.num_batches)
