@@ -24,8 +24,8 @@ defaults = {
 }
 
 hparams = [
- { "data_dim": 2, "cov_dof": 4, "data_points_per_mode": 50, "k": [4, 8], "noise_pct": [0.5, 0.15, 0.25]},
+ { "data_dim": 2, "cov_dof": 4, "data_points_per_mode": 50, "k": [4, 8, 16], "noise_pct": [0.5, 0.15, 0.25]},
  { "data_dim": 4, "cov_dof": 6, "data_points_per_mode": 88, "k": 4, "noise_pct": [0.5, 0.15, 0.25]},
- { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": [4, 8], "noise_pct": [0.5, 0.15, 0.25]},
+ { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": [4, 8, 16], "noise_pct": [0.5, 0.15, 0.25]},
  { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 4, "noise_pct": [0.5, 0.15, 0.25]},
 ]
