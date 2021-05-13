@@ -171,7 +171,7 @@ def eval_model_in_batches(
         data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
         eval_batch_size // num_batches)
     tfmr_metrics += tfmr_ms
-    em_ms += em_ms
+    em_metrics += em_ms
 
   return tfmr_metrics / num_batches, em_metrics / num_batches
 
@@ -278,22 +278,6 @@ def main(unused_argv):
         FLAGS.eval_batch_size,
         FLAGS.num_batches)
   print_tables(metrics, metrics)
-
-
-  key = jax.random.PRNGKey(0)
-  key, subkey = jax.random.split(key)
-  model, init_params = make_model(
-      key,
-      model_name=FLAGS.model_name,
-      num_encoders=FLAGS.num_encoders,
-      num_decoders=FLAGS.num_decoders,
-      num_heads=FLAGS.num_heads,
-      value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
-      data_points_per_mode=FLAGS.data_points_per_mode,
-      max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim, 
-      normalization=FLAGS.normalization,
-      dist=FLAGS.dist)
 
 if __name__ == "__main__":
   app.run(main)
