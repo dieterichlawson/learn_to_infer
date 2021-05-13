@@ -95,12 +95,12 @@ def eval_model(
     if min_k != max_k:
       xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
           key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult, None)
     else:
       ks = jnp.full([eval_batch_size], max_k)
       xs, cs, params = sample_gmm.sample_batch_fixed_ks(
         key, sampling_types[model_name], ks, max_k, 2 * max_k * points_per_mode, 
-        data_dim, mode_var, cov_dof, cov_prior, dist_mult)
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult, None)
     train_xs = xs[:, :max_k * points_per_mode]
     test_xs = xs[:, max_k * points_per_mode:]
     train_cs = cs[:, :max_k * points_per_mode]
