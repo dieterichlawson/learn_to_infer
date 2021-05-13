@@ -210,3 +210,30 @@ def compute_masked_baseline_metrics(
   em_test_ll = em_test_ll_tot / batch_size
 
   return (em_train_acc, em_test_acc, em_train_f1, em_test_f1, em_train_ll, em_test_ll)
+
+
+def masked_em_train_metrics(xs, cs, prob_type, mode_var, num_modes, num_points):
+  batch_size = xs.shape[0]
+  # EM
+  em_acc_tot = 0.
+  em_f1_tot = 0.
+  em_ll_tot = 0.
+  for i in range(batch_size):
+    n_i = num_points[i]
+    k_i = num_modes[i]
+    xi = xs[i, :n_i]
+    ci = cs[i, :n_i]
+    
+    pred_cs, pred_params = em_fit_and_predict(xi, k_i, prob_type, mode_var)
+
+    acc, f1, ll = metrics(
+        xi, pred_params, ci, pred_cs, n_i, k_i)
+
+    em_acc_tot += acc
+    em_f1_tot += f1
+    em_ll_tot += ll
+
+  em_acc = em_acc_tot / batch_size
+  em_f1 = em_f1_tot / batch_size
+  em_ll = em_ll_tot / batch_size
+  return (em_acc, em_f1, em_ll)

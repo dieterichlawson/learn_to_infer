@@ -98,24 +98,18 @@ def log_marginal(x, mus, covs, ws):
 
 
 def plot_em_comparison(
-    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs, em_params, 
-    algo_num_modes=None):
+    xs, num_modes, true_cs, true_params, pred_cs, pred_params, em_cs, em_params):
   true_means, true_covs, true_weights = true_params
   pred_means, pred_covs, pred_weights = pred_params
   em_means, em_covs, em_weights = em_params
   em_cs, em_means, em_covs, em_weights = [jnp.array(x) for x in [em_cs, em_means, em_covs, em_weights]]
   fig, ax = plt.subplots(nrows=1, ncols=3, sharey=True, figsize=(14, 4))
-  plot_gmm_on_ax(ax[0], xs, num_modes, true_cs, true_means, true_covs,
-                 true_weights)
+  plot_gmm_on_ax(ax[0], xs, num_modes, true_cs, true_means, true_covs, true_weights)
   ax[0].set_title("True Clustering")
-  if algo_num_modes is None:
-    plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs, pred_weights)
-    plot_gmm_on_ax(ax[2], xs, num_modes, em_cs, em_means, em_covs, em_weights)
-  else:
-    plot_gmm_on_ax(ax[1], xs, algo_num_modes, pred_cs, pred_means, pred_covs, pred_weights)
-    plot_gmm_on_ax(ax[2], xs, algo_num_modes, em_cs, em_means, em_covs, em_weights)
-    ax[1].set_title("Predicted Clustering")
-    ax[2].set_title("EM Clustering")
+  plot_gmm_on_ax(ax[1], xs, num_modes, pred_cs, pred_means, pred_covs, pred_weights)
+  ax[1].set_title("Predicted Clustering")
+  plot_gmm_on_ax(ax[2], xs, num_modes, em_cs, em_means, em_covs, em_weights)
+  ax[2].set_title("EM Clustering")
   return fig
 
 def plot_em_dpmm_comparison(
@@ -141,12 +135,14 @@ def plot_em_dpmm_comparison(
   return fig
 
 def plot_points_on_ax(ax, xs, num_modes, cs, means):
-
-  for i in range(num_modes):
+  for i in range(-1, num_modes):
     i_xs = xs[cs == i]
     if len(i_xs > 0):
-      ax.plot(i_xs[:, 0], i_xs[:, 1], "o")
-    if means is not None:
+      if i > -1:
+        ax.plot(i_xs[:, 0], i_xs[:, 1], "o")
+      else:
+        ax.plot(i_xs[:, 0], i_xs[:, 1], "o", color="black")
+    if i > -1 and means is not None:
       ax.plot(means[i, 0], means[i, 1], "r*")
 
 

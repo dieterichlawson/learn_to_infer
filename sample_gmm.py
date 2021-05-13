@@ -490,9 +490,7 @@ def batch_with_all_random_params_random_ks(
     key, batch_size, min_k, max_k, num_data_points, data_dim, cov_dof,
     cov_shape, cov_prior, dist_mult):
   k1, k2 = jax.random.split(key)
-  ks = jax.random.choice(k1, jnp.arange(min_k, stop=max_k+1),
-                         shape=(batch_size,), replace=True)
-
+  ks = jax.random.choice(k1, jnp.arange(min_k, stop=max_k+1), shape=(batch_size,), replace=True)
   xs, cs, params = batch_with_all_random_params_fixed_ks(
       k2, ks, max_k, num_data_points, data_dim, cov_dof, cov_shape, cov_prior,
       dist_mult)
@@ -502,7 +500,16 @@ def batch_with_all_random_params_random_ks(
 
 def sample_batch_random_ks(
     key, sampling_type, batch_size, min_k, max_k, num_data_points,
-    data_dim, mode_variance, cov_dof, cov_prior, dist_mult):
+    data_dim, mode_variance, cov_dof, cov_prior, dist_mult, noise_pct):
+
+  if noise_pct is None:
+    num_noise_points = 0
+    num_normal_points = num_data_points
+  else:
+    num_normal_points = int(num_data_points * (1. - noise_pct))
+    num_noise_points = num_data_points - num_normal_points
+
+  key1, key2 = jax.random.split(key)
   if sampling_type == "mean":
     xs, cs, ks, params = batch_with_random_mu_random_ks(
         key, batch_size, min_k, max_k,
@@ -518,25 +525,67 @@ def sample_batch_random_ks(
         key, batch_size, min_k, max_k,
         num_data_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, dist_mult)
+
+  if noise_pct is not None:
+    xs, cs = add_noise_samples(key2, xs, cs, batch_size, data_dim, num_noise_points,
+        num_data_points)
+
   return xs, cs, ks, params
 
 
 def sample_batch_fixed_ks(
     key, sampling_type, ks, max_k, num_data_points, data_dim,
-    mode_variance, cov_dof, cov_prior, dist_mult):
+    mode_variance, cov_dof, cov_prior, dist_mult, noise_pct):
+
+  if noise_pct is None:
+    num_noise_points = 0
+    num_normal_points = num_data_points
+  else:
+    num_normal_points = int(num_data_points * (1. - noise_pct))
+    num_noise_points = num_data_points - num_normal_points
+
+  key1, key2 = jax.random.split(key)
   if sampling_type == "mean":
     xs, cs, params = batch_with_random_mu_fixed_ks(
-        key, ks, max_k, num_data_points, data_dim,
+        key1, ks, max_k, num_normal_points , data_dim,
         jnp.eye(data_dim)*mode_variance, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale":
     xs, cs, params = batch_with_random_mu_cov_fixed_ks(
-        key, ks, max_k, num_data_points, data_dim,
+        key1, ks, max_k, num_normal_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, jnp.zeros([max_k]), dist_mult)
   elif sampling_type == "mean_scale_weight":
     xs, cs, params = batch_with_all_random_params_fixed_ks(
-        key, ks, max_k, num_data_points, data_dim,
+        key1, ks, max_k, num_normal_points, data_dim,
         cov_dof, jnp.eye(data_dim), cov_prior, dist_mult)
+
+  if noise_pct is not None:
+    xs, cs = add_noise_samples(key2, xs, cs, ks.shape[0], data_dim, num_noise_points,
+        num_data_points)
+
   return xs, cs, params
+
+def add_noise_samples(key, xs, cs, batch_size, data_dim, num_noise_points, num_data_points):
+  key1, key2 = jax.random.split(key)
+  min_xs = jnp.min(xs, axis=1)
+  max_xs = jnp.max(xs, axis=1)
+  min_xs = min_xs - (max_xs - min_xs) / 4.
+  max_xs = max_xs + (max_xs - min_xs) / 4.
+
+  noise = jax.random.uniform(key1, shape=[batch_size, data_dim, num_noise_points],
+      minval=min_xs[..., jnp.newaxis], maxval=max_xs[..., jnp.newaxis])
+  # [batch_size, num_data_points, data_dim]
+  xs = jnp.concatenate([xs, jnp.transpose(noise, (0,2,1))], axis=1)
+  # [batch_size, num_data_points]
+  cs = jnp.concatenate([cs, jnp.full([batch_size, num_noise_points], -1)], axis=1)
+  # sample a random permutation of the data for each batch to mix the noise points in with
+  # the rest
+  p = vmap(jax.random.permutation, in_axes=(0, None))(
+      jax.random.split(key2, num=batch_size), jnp.arange(num_data_points))
+  perm = vmap(lambda a,i: a[i])
+  perm_xs = perm(xs, p)
+  perm_cs = perm(cs, p)
+  return perm_xs, perm_cs
+
 
 
 @partial(jax.jit, static_argnums=5)
