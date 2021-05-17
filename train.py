@@ -169,6 +169,7 @@ def parallel_train_loop(key,
                         expensive_summarize_every=100,
                         checkpoint_every=5000,
                         clobber_checkpoint=False,
+                        log_grad_norms=True,
                         logdir="/tmp/lda_inference"):
 
   loss_fn = jax.jit(loss_fn)
@@ -189,7 +190,11 @@ def parallel_train_loop(key,
     loss_grad = jax.lax.pmean(loss_grad, "batch")
     new_optimizer = optimizer.apply_gradient(
         loss_grad, learning_rate=lr_fn(optimizer.state.step))
-    return new_optimizer, key
+    if log_grad_norms:
+      loss_norm = jnp.linalg.norm(loss_grad)
+      return new_optimizer, key, loss_norm
+    else:
+      return new_optimizer, key
 
   sw = SummaryWriter(logdir)
 
@@ -203,7 +208,14 @@ def parallel_train_loop(key,
                                   optimizer.state.step, keep=3)
       print("Checkpoint saved for step %d" % optimizer.state.step)
 
-    repl_optimizer, repl_key = train_step(repl_optimizer, repl_key)
+    if log_grad_norms:
+      repl_optimizer, repl_key, repl_grad_norm = train_step(repl_optimizer, repl_key)
+      norm = jax_utils.unreplicate(repl_grad_norm)
+      print("Step %d grad norm %0.2f" % (t, norm))
+      sw.scalar("grad norm", norm, step=t)
+    else:
+      repl_optimizer, repl_key = train_step(repl_optimizer, repl_key)
+
     
     if t % expensive_summarize_every == 0:
       key, subkey = jax.random.split(jax_utils.unreplicate(repl_key))
