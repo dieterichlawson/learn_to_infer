@@ -235,16 +235,21 @@ def fixed_point(f, a, x_init):
   Returns:
     x_*: the fixed point of f.
   """
+  max_iters = 10000
+
   def cond_fun(carry):
-    x_prev, x = carry
-    #hcb.id_print(x)
-    return jnp.logical_not(jnp.allclose(x_prev, x, rtol=1e-4, atol=1e-4))
+    t, x_prev, x = carry
+    return jnp.logical_and(
+        t <= max_iters,
+        jnp.logical_and(
+          jnp.logical_not(jnp.any(jnp.isnan(x))),
+          jnp.logical_not(jnp.allclose(x_prev, x, rtol=1e-4, atol=1e-4))))
 
   def body_fun(carry):
-    _, x = carry
-    return x, f(a, x)
+    t, _, x = carry
+    return t+1, x, f(a, x)
 
-  _, x_star = jax.lax.while_loop(cond_fun, body_fun, (x_init, f(a, x_init)))
+  _, _, x_star = jax.lax.while_loop(cond_fun, body_fun, (0, x_init, f(a, x_init)))
   return x_star
 
 

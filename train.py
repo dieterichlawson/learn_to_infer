@@ -186,6 +186,8 @@ def parallel_train_loop(key,
   def train_step(optimizer, key):
     key, subkey = jax.random.split(key)
     loss_grad = jax.grad(loss_fn, argnums=0)(optimizer.target, subkey)
+    loss_grad = jax.tree_util.tree_map(
+        lambda x: jnp.nan_to_num(x, posinf=1e10, neginf=-1e10), loss_grad)
     loss_grad = jax.lax.pmean(loss_grad, "batch")
     new_optimizer = optimizer.apply_gradient(
         loss_grad, learning_rate=lr_fn(optimizer.state.step))
