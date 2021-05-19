@@ -235,7 +235,7 @@ def fixed_point(f, a, x_init):
   Returns:
     x_*: the fixed point of f.
   """
-  max_iters = 10000
+  max_iters = 1000000
 
   def cond_fun(carry):
     t, x_prev, x = carry
