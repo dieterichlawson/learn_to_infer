@@ -105,7 +105,7 @@ def local_train_loop(
         loss_fn, argnums=0)(optimizer.target, key)
     new_optimizer = optimizer.apply_gradient(
         loss_grad, learning_rate=lr_fn(optimizer.state.step))
-    return loss_val, new_optimizer
+    return loss_val, new_optimizer, loss_grad
 
   train_step = jit(train_step)
 
@@ -121,7 +121,7 @@ def local_train_loop(
       print("Checkpoint saved for step %d" % optimizer.state.step)
     key, subkey = jax.random.split(key)
     try:
-      loss_val, new_optimizer = train_step(optimizer, subkey)
+      loss_val, new_optimizer, loss_grad = train_step(optimizer, subkey)
     except FloatingPointError as e:
       print("Exception on step %d" % t)
       print(e)
@@ -134,7 +134,7 @@ def local_train_loop(
       sys.stdout.flush()
       sys.exit(1)
     optimizer = new_optimizer
-   
+    
     if t % expensive_summarize_every == 0:
       key, subkey = jax.random.split(key)
       expensive_summarize_fn(sw, t, optimizer.target, subkey)
@@ -169,7 +169,6 @@ def parallel_train_loop(key,
                         expensive_summarize_every=100,
                         checkpoint_every=5000,
                         clobber_checkpoint=False,
-                        log_grad_norms=True,
                         logdir="/tmp/lda_inference"):
 
   loss_fn = jax.jit(loss_fn)
@@ -190,11 +189,7 @@ def parallel_train_loop(key,
     loss_grad = jax.lax.pmean(loss_grad, "batch")
     new_optimizer = optimizer.apply_gradient(
         loss_grad, learning_rate=lr_fn(optimizer.state.step))
-    if log_grad_norms:
-      loss_norm = jnp.linalg.norm(loss_grad)
-      return new_optimizer, key, loss_norm
-    else:
-      return new_optimizer, key
+    return new_optimizer, key
 
   sw = SummaryWriter(logdir)
 
@@ -208,13 +203,7 @@ def parallel_train_loop(key,
                                   optimizer.state.step, keep=3)
       print("Checkpoint saved for step %d" % optimizer.state.step)
 
-    if log_grad_norms:
-      repl_optimizer, repl_key, repl_grad_norm = train_step(repl_optimizer, repl_key)
-      norm = jax_utils.unreplicate(repl_grad_norm)
-      print("Step %d grad norm %0.2f" % (t, norm))
-      sw.scalar("grad norm", norm, step=t)
-    else:
-      repl_optimizer, repl_key = train_step(repl_optimizer, repl_key)
+    repl_optimizer, repl_key = train_step(repl_optimizer, repl_key)
 
     
     if t % expensive_summarize_every == 0:
