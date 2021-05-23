@@ -1,0 +1,30 @@
+experiment_name = "noisy_exp_2"
+
+command = "python3 learn_to_infer/run_gmm.py"
+
+defaults = {
+  "model_name": "msw_unconditional",
+  "num_encoders": 6,
+  "num_decoders": 2,
+  "num_heads": 16,
+  "key_dim": 64,
+  "value_dim_per_head": 32,
+  "cov_prior": "inv_wishart",
+  "dist_multiplier": .68,
+  "dist": "l2",
+  "batch_size": 128,
+  "eval_batch_size": 8,
+  "lr": 1e-1,
+  "summarize_every": 2500,
+  "checkpoint_every": 10000,
+  "expensive_summarize_every": 10000,
+  "num_steps": int(1e8),
+  "normalization": "layer_norm",
+  "logdir": "gs://l2i/%s" % experiment_name
+}
+
+hparams = [
+ { "data_dim": 4, "cov_dof": 6, "data_points_per_mode": 88, "k": 4, "noise_pct": [0.5, 0.15, 0.25]},
+ { "data_dim": 8, "cov_dof": 10, "data_points_per_mode": 155, "k": [4, 8, 16], "noise_pct": [0.5, 0.15, 0.25]},
+ { "data_dim": 16, "cov_dof": 18, "data_points_per_mode": 278, "k": 4, "noise_pct": [0.5, 0.15, 0.25]},
+]
