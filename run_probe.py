@@ -184,7 +184,7 @@ def make_loss(model,
   def loss(params, key):
     key, subkey = jax.random.split(key)
     xs, _, ks, mog_params = sample_train_batch(key)
-    losses = model.loss(
+    losses, _, _ = model.loss(
         params, xs, ks*data_points_per_mode, mog_params, ks, subkey)
     return jnp.mean(losses)
 
@@ -212,14 +212,16 @@ def make_summarize(
 
   def sample_and_pred(key, params, points_per_mode, min_k, max_k):
     xs, cs, ks, true_gmm_params = sample_eval_batch(key, points_per_mode, min_k, max_k)
-    losses = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
+    losses, entropy, guess_ce = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
     # [num_layers]
-    return jnp.mean(losses, axis=-1)
+    return jnp.mean(losses, axis=-1), jnp.mean(entropy), jnp.mean(guess_ce)
 
   sample_and_pred = jax.jit(sample_and_pred, static_argnums=(2,3,4))
 
   def summarize(writer, step, params, key):
-    losses = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
+    losses, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
+    print("Entropy: %0.2f" % entropy)
+    print("Guessing CE: %0.4f" % guess_ce)
     for i in range(losses.shape[0]):
       writer.scalar("layer %d cross-entropy" % (i+1), losses[i], step=step)
       print("layer %d cross-entropy" % (i+1), losses[i])
@@ -288,23 +290,23 @@ def main(unused_argv):
     model, init_params = attach_probe(
       key,
       og_logdir,
-      num_encoders=flags.num_encoders,
-      num_decoders=flags.num_decoders,
-      num_heads=flags.num_heads,
-      value_dim=flags.value_dim_per_head*flags.num_heads,
-      data_points_per_mode=flags.data_points_per_mode,
-      max_k=flags.max_k,
-      data_dim=flags.data_dim)
+      num_encoders=FLAGS.num_encoders,
+      num_decoders=FLAGS.num_decoders,
+      num_heads=FLAGS.num_heads,
+      value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
+      data_points_per_mode=FLAGS.data_points_per_mode,
+      max_k=FLAGS.max_k,
+      data_dim=FLAGS.data_dim)
   else:
     model, init_params = make_model(
       key,
-      num_encoders=flags.num_encoders,
-      num_decoders=flags.num_decoders,
-      num_heads=flags.num_heads,
-      value_dim=flags.value_dim_per_head*flags.num_heads,
-      data_points_per_mode=flags.data_points_per_mode,
-      max_k=flags.max_k,
-      data_dim=flags.data_dim)
+      num_encoders=FLAGS.num_encoders,
+      num_decoders=FLAGS.num_decoders,
+      num_heads=FLAGS.num_heads,
+      value_dim=FLAGS.value_dim_per_head*flags.num_heads,
+      data_points_per_mode=FLAGS.data_points_per_mode,
+      max_k=FLAGS.max_k,
+      data_dim=FLAGS.data_dim)
   loss_fn = make_loss(
       model,
       min_k=FLAGS.min_k,

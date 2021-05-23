@@ -728,13 +728,14 @@ class ProbedMSWUnconditional:
       entropy_alpha: The weight of the entropy regularization in the loss.
     """
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
+    self.max_k = max_k
     self.model = transformer.ProbedUnconditionalEncoderDecoderTransformer.partial(
         target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
         activation_fn=activation_fn, normalization=normalization, weight_init=weight_init,
         name="UnconditionalEncoderDecoderTransformer")
-    self.data_dim = 2
+    self.data_dim = data_dim
 
 
   def loss(self, params, inputs, input_lengths, true_params, ks, key):
@@ -765,8 +766,10 @@ class ProbedMSWUnconditional:
     true_covs = jnp.einsum("...ik,...jk->...ij", true_scales, true_scales)
     
     # [batch_size, max_num_data_points, k]
-    resps = vmap(gmm_eval.responsibilities)(inputs, true_means, true_covs, true_log_weights)
-
+    log_resps = vmap(gmm_eval.responsibilities)(inputs, true_means, true_covs, true_log_weights)
+    resps = jnp.exp(log_resps)
+    entropy = jnp.sum(-resps*log_resps, axis=-1)
+    guess_ce = jnp.sum(-resps*jnp.full_like(resps, jnp.log(1./self.max_k)), axis=-1)
     #[num_layers, batch_size, max_num_data_points, k]
     _, preds = self.model.call(params, inputs, input_lengths, ks)
 
@@ -775,7 +778,7 @@ class ProbedMSWUnconditional:
     # [num_layers, batch_size, max_num_data_points]
     cross_ent = -jnp.sum(pred_logits*true_probs[jnp.newaxis,...], axis=-1)
     # [num_layers, batch_size]
-    return jnp.mean(cross_ent, axis=-1)
+    return jnp.mean(cross_ent, axis=-1), jnp.mean(entropy, axis=-1), jnp.mean(guess_ce, axis=-1)
 
   def init_params(self, key):
     """Initializes the parameters of the model using dummy data.

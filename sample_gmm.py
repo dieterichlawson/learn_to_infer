@@ -250,6 +250,7 @@ def sample_all_gmm_params(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior
   raw_ws = jax.random.normal(key3, shape=[max_k])*0.5
   cond = jnp.arange(max_k) < k
   log_ws = jnp.where(cond, raw_ws, jnp.ones_like(raw_ws)*-jnp.inf)
+  log_ws -= jscipy.special.logsumexp(log_ws)
   return mus, covs, log_ws
 
 
@@ -296,6 +297,7 @@ def sample_gmm_mu_and_cov(key, k, max_k, data_dim, cov_dof, cov_shape, cov_prior
   log_ws = jnp.where(cond,
                      log_weights,
                      jnp.ones_like(log_weights)*-jnp.inf)
+  log_ws -= jscipy.special.logsumexp(log_ws)
   return mus, covs, log_ws
 
 
@@ -330,6 +332,7 @@ def sample_gmm_mu(key, k, max_k, data_dim, cov, log_weights, dist_mult):
   log_ws = jnp.where(cond,
                      log_weights,
                      jnp.ones_like(log_weights)*-jnp.inf)
+  log_ws -= jscipy.special.logsumexp(log_ws)
   return mus, covs, log_ws
 
 
