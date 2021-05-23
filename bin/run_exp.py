@@ -20,6 +20,9 @@ parser.add_argument('--reinit_tpus', type=str,
                     help='Stop the tpu computation, deploy new code, and restart.')
 parser.add_argument('--bump_tpus', type=str,
                     help='Restart the tpu computation.')
+parser.add_argument('--zone', type=str, default="europe-west4-a",
+                    help='Where to put the TPUs.')
+
 
 args = parser.parse_args()
 
@@ -50,17 +53,19 @@ commands = orch.make_commands(command, *hparams, defaults=defaults)
 
 if args.reinit_tpus is not None and len(args.reinit_tpus) > 0:
   filtered_cmds = [commands[i-1] for i in args.reinit_tpus]
-  orch.reinit_tpus(experiment_name, args.reinit_tpus, args.dry_run)
-  orch.run_commands_on_tpus(experiment_name, filtered_cmds, args.reinit_tpus, args.dry_run)
+  orch.reinit_tpus(experiment_name, args.reinit_tpus, args.dry_run, region=args.zone)
+  orch.run_commands_on_tpus(experiment_name, filtered_cmds, args.reinit_tpus, args.dry_run,
+      region=args.zone)
 elif args.bump_tpus is not None and len(args.bump_tpus) > 0:
   filtered_cmds = [commands[i-1] for i in args.bump_tpus]
-  orch.stop_tpus(experiment_name, args.bump_tpus, args.dry_run)
-  orch.run_commands_on_tpus(experiment_name, filtered_cmds, args.bump_tpus, args.dry_run)
+  orch.stop_tpus(experiment_name, args.bump_tpus, args.dry_run, region=args.zone)
+  orch.run_commands_on_tpus(experiment_name, filtered_cmds, args.bump_tpus, args.dry_run,
+      region=args.zone)
 else:
   if args.create_and_init_tpus:
-    orch.create_and_init_tpus(experiment_name, len(commands), args.dry_run)
+    orch.create_and_init_tpus(experiment_name, len(commands), args.dry_run, region=args.zone)
   elif args.init_tpus:
-    if orch.ensure_tpus_up(experiment_name, len(commands), args.dry_run):
-      orch.initialize_tpus(experiment_name, len(commands), args.dry_run)
+    if orch.ensure_tpus_up(experiment_name, len(commands), args.dry_run, region=args.zone):
+      orch.initialize_tpus(experiment_name, len(commands), args.dry_run, region=args.zone)
 
-  orch.run_commands(experiment_name, commands, args.dry_run)
+  orch.run_commands(experiment_name, commands, args.dry_run, region=args.zone)

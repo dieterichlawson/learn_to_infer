@@ -49,68 +49,68 @@ def allow_ssh(dry_run):
                 " --direction=INGRESS --priority=1000 --network=default --action=ALLOW"
                 " --rules=tcp:22 --source-ranges=0.0.0.0/0", dry_run)
 
-def create_and_init_tpus(basename, num_tpus, dry_run):
-  create_tpus(basename, num_tpus, dry_run)
-  if ensure_tpus_up(basename, num_tpus, dry_run):
-    initialize_tpus(basename, num_tpus, dry_run)
+def create_and_init_tpus(basename, num_tpus, dry_run, region="europe-west4-a"):
+  create_tpus(basename, num_tpus, dry_run, region=region)
+  if ensure_tpus_up(basename, num_tpus, dry_run, region=region):
+    initialize_tpus(basename, num_tpus, dry_run, region=region)
   else:
     print("Not initializing TPUs")
 
-def create_tpus(basename, num_tpus, dry_run):
+def create_tpus(basename, num_tpus, dry_run, region="europe-west4-a"):
   dry_run_string = "--dry-run" if dry_run else ""
   # start the tpus
   print("Creating %d tpus..." % num_tpus)
   os.system("seq 1 %d |"
             " parallel %s gcloud alpha compute tpus tpu-vm create l2i_%s_{}" 
-            " --zone europe-west4-a --accelerator-type v3-8"
-            " --version v2-alpha" % (num_tpus, dry_run_string, basename))
+            " --zone %s --accelerator-type v3-8"
+            " --version v2-alpha" % (num_tpus, dry_run_string, basename, region))
 
-def ensure_tpus_up(basename, num_tpus, dry_run):
+def ensure_tpus_up(basename, num_tpus, dry_run, region="europe-west4-a"):
   allow_ssh(dry_run)
   if not dry_run:
-    return wait_till_tpus_up(basename, num_tpus)
+    return wait_till_tpus_up(basename, num_tpus, region=region)
   else:
     return True
 
-def initialize_tpus(basename, num_tpus, dry_run):
+def initialize_tpus(basename, num_tpus, dry_run, region="europe-west4-a"):
   allow_ssh(dry_run)
   dry_run_string = "--dry-run" if dry_run else ""
   print("Preparing VMs...")
   os.system("seq 1 %d |"
-            " parallel %s --jobs %d 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+            " parallel %s --jobs %d 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone %s"
             " -- \"git clone https://github.com/dieterichlawson/learn_to_infer.git"
             " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
-              num_tpus, dry_run_string, num_tpus, basename))
+              num_tpus, dry_run_string, num_tpus, basename, region))
 
-def reinit_tpus(basename, tpu_nums, dry_run):
+def reinit_tpus(basename, tpu_nums, dry_run, region="europe-west4-a"):
   allow_ssh(dry_run)
   dry_run_string = "--dry-run" if dry_run else ""
   tpu_num_string = "\n".join([str(x) for x in tpu_nums])
   print("Resetting TPUs")
   os.system("echo '%s' | parallel %s --jobs %d "
-      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone %s"
       " -- \"tmux kill-server;"
       " pkill -f learn_to_infer\/run_gmm.py ;"
       " rm -r -f learn_to_infer"
       " && git clone https://github.com/dieterichlawson/learn_to_infer.git"
       " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
-        tpu_num_string, dry_run_string, len(tpu_nums), basename))
+        tpu_num_string, dry_run_string, len(tpu_nums), basename, region))
 
-def stop_tpus(basename, tpu_nums, dry_run):
+def stop_tpus(basename, tpu_nums, dry_run, region="europe-west4-a"):
   allow_ssh(dry_run)
   dry_run_string = "--dry-run" if dry_run else ""
   tpu_num_string = "\n".join([str(x) for x in tpu_nums])
   print("Stopping TPU computation...")
   os.system("echo '%s' | parallel %s --jobs %d "
-      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone europe-west4-a"
+      " 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone %s"
       " -- \"tmux kill-server;  pkill -f learn_to_infer\/run_gmm.py\"'" % (
-        tpu_num_string, dry_run_string, len(tpu_nums), basename))
+        tpu_num_string, dry_run_string, len(tpu_nums), basename, region))
 
-def wait_till_tpus_up(basename, num_tpus, max_retries=3):
+def wait_till_tpus_up(basename, num_tpus, max_retries=3, region="europe-west4-a"):
 
   def check_tpu(tpu_num):
     cmd = ("gcloud alpha compute tpus tpu-vm ssh l2i_%s_%d"
-           " --zone europe-west4-a --command=exit" % (basename, tpu_num))
+           " --zone %s --command=exit" % (basename, tpu_num, region))
     up = False
     num_tries = 0
     while not up and num_tries < max_retries:
@@ -138,10 +138,10 @@ def wait_till_tpus_up(basename, num_tpus, max_retries=3):
     print("TPUs %s failed to come up after %d retries." % (", ".join(down_tpus), max_retries))
     return False
 
-def run_commands(basename, commands, dry_run):
-  run_commands_on_tpus(basename, commands, range(1, len(commands)+1), dry_run)
+def run_commands(basename, commands, dry_run, region="europe-west4-a"):
+  run_commands_on_tpus(basename, commands, range(1, len(commands)+1), dry_run, region=region)
 
-def run_commands_on_tpus(basename, commands, tpu_nums, dry_run):
+def run_commands_on_tpus(basename, commands, tpu_nums, dry_run, region="europe-west4-a"):
   num_tpus = len(commands)
   dry_run_string = "--dry-run" if dry_run else ""
   tmux_cmd = "%d	tmux new-session -d \"%s --tag=%d; read;\""
@@ -150,4 +150,4 @@ def run_commands_on_tpus(basename, commands, tpu_nums, dry_run):
   allow_ssh(dry_run)
   os.system("echo '%s' |"
             " parallel --colsep '	' --jobs %d %s gcloud alpha compute tpus tpu-vm ssh l2i_%s_{1}"
-            " --zone europe-west4-a -- {2}" % (tmux_cmd_string, num_tpus, dry_run_string, basename))
+            " --zone %s -- {2}" % (tmux_cmd_string, num_tpus, dry_run_string, basename, region))
