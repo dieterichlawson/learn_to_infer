@@ -101,7 +101,7 @@ flags.DEFINE_boolean("plot_sklearn_comparison", False,
                      "If true, generate the sklearn clustering comparison "
                      "plots.")
 flags.DEFINE_enum("normalization", 
-                  "no_norm", ["no_norm", "layer_norm", "batch_norm"],
+                  "layer_norm", ["no_norm", "layer_norm", "batch_norm"],
                   "Type of normalization to use")
 flags.DEFINE_string("tag", "",
                     "String to append to the logdir.")

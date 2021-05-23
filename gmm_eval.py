@@ -37,17 +37,25 @@ def log_marginal(xs, mus, covs, log_ws):
   """Computes the log_marginal probability of x under a GMM.
 
   Args:
-    x: A shape [N, D] vector, the data to compute log p(x) for.
+    xs: A shape [N, D] vector, the data to compute log p(x) for.
     mus: A [K,D] matrix, the K D-dimensional mixture component means.
     covs: A [K,D,D] matrix, the covariances of the mixture components.
     log_ws: A shape [K] vector, the log mixture weights.
 
   Returns:
-    p(x), a float scalar.
+    p(x), a tensor of shape [N].
   """
   return tfd.MixtureSameFamily(
     tfd.Categorical(logits=log_ws),
     tfd.MultivariateNormalFullCovariance(loc=mus, covariance_matrix=covs)).log_prob(xs)  
+
+def responsibilities(xs, mus, covs, log_ws):
+  c_dist = tfd.MultivariateNormalFullCovariance(loc=mus, covariance_matrix=covs)
+  # [num_data_points, num_components]
+  comp_lps = vmap(c_dist.log_prob)(xs)
+  # [num_data_points, num_components]
+  resps = comp_lps + log_ws[jnp.newaxis,...] - log_marginal(xs, mus, covs, log_ws)[:, jnp.newaxis]
+  return resps
 
 def masked_log_marginal_per_x(xs, mus, covs, log_ws, mask, k):
   max_k = mus.shape[0]

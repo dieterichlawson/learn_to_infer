@@ -19,6 +19,7 @@ from functools import partial
 
 import transformer
 import util
+import gmm_eval
 
 import flax
 import jax
@@ -694,4 +695,104 @@ class UnconditionalFixedK(FixedKInferenceMachine):
     super().__init__(
         model, data_dim=data_dim, max_k=max_k, algo_k=algo_k,
         dist=dist, entropy_alpha=entropy_alpha)
+
+class ProbedMSWUnconditional:
+
+  def __init__(self,
+               data_dim=2,
+               max_k=2,
+               algo_k=None,
+               num_heads=8,
+               num_encoders=6,
+               num_decoders=6,
+               qkv_dim=512,
+               activation_fn=flax.nn.relu,
+               normalization="no_norm",
+               dist="l2",
+               weight_init=jax.nn.initializers.xavier_uniform(),
+               entropy_alpha=0.01):
+    """Creates the model.
+
+    Args:
+      data_dim: The dimensionality of the data points to be fed in.
+      max_k: The maximum number of clusters that could occur in the data.
+      num_heads: The number of heads to use in the transformer.
+      num_encoders: The number of encoder layers to use in the transformer.
+      num_decoders: The number of decoder layers to use in the transformer.
+      qkv_dim: The dimensions of the queries, keys, and values in the
+        transformer.
+      activation_fn: The activation function to use for hidden layers.
+      normalization: The type of normalization to use, either layernorm or no_norm.
+      dist: The distance function to use
+      weight_init: The weight initializer.
+      entropy_alpha: The weight of the entropy regularization in the loss.
+    """
+    target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
+    self.model = transformer.ProbedUnconditionalEncoderDecoderTransformer.partial(
+        target_dim=target_dim, max_target_length=max_k,
+        num_heads=num_heads, num_encoders=num_encoders,
+        num_decoders=num_decoders, qkv_dim=qkv_dim,
+        activation_fn=activation_fn, normalization=normalization, weight_init=weight_init,
+        name="UnconditionalEncoderDecoderTransformer")
+    self.data_dim = 2
+
+
+  def loss(self, params, inputs, input_lengths, true_params, ks, key):
+    """Computes the wasserstein loss for this model.
+
+    Args:
+      params: The parameters of the model, returned from init().
+      inputs: A [batch_size, max_num_data_points, data_dim] set of input data.
+      input_lengths: A [batch_size] set of integers representing the number of
+        data points in each batch element.
+      true_params: A three-tuple containing
+        true_means: A [batch_size, max_k, data_dim] tensor containing the true
+          means of the cluster components for each batch element.
+        true_scales: A [batch_size, max_k, data_dim, data_dim] tensor containing
+          the true scales of the cluster components for each batch element.
+          Should be the lower-triangular square root of a PSD matrix.
+        true_log_weights: A [batch_size, max_k] tensor containing the true
+          log weights of the cluster components for each batch element.
+      ks: A [batch_size] set of integers representing the true number of
+        clusters in each batch element.
+      key: A JAX PRNG key.
+    Returns:
+      The wasserstein distance from the set of predicted mus to the true set
+      of mus, a tensor of shape [batch_size].
+    """
+    batch_size = inputs.shape[0]
+    true_means, true_scales, true_log_weights = true_params
+    true_covs = jnp.einsum("...ik,...jk->...ij", true_scales, true_scales)
+    
+    # [batch_size, max_num_data_points, k]
+    resps = vmap(gmm_eval.responsibilities)(inputs, true_means, true_covs, true_log_weights)
+
+    #[num_layers, batch_size, max_num_data_points, k]
+    _, preds = self.model.call(params, inputs, input_lengths, ks)
+
+    pred_logits = jax.nn.log_softmax(preds, axis=-1)
+    true_probs = jax.lax.stop_gradient(jax.nn.softmax(resps, axis=-1))
+    # [num_layers, batch_size, max_num_data_points]
+    cross_ent = -jnp.sum(pred_logits*true_probs[jnp.newaxis,...], axis=-1)
+    # [num_layers, batch_size]
+    return jnp.mean(cross_ent, axis=-1)
+
+  def init_params(self, key):
+    """Initializes the parameters of the model using dummy data.
+
+    Args:
+      key: A JAX PRNG key
+    Returns:
+      params: The parameters of the model.
+    """
+    key, subkey = jax.random.split(key)
+    batch_size = 1
+    max_num_data_points = 32
+    inputs = jax.random.normal(
+        subkey, [batch_size, max_num_data_points, self.data_dim])
+    input_lengths = jnp.full([batch_size], max_num_data_points)
+    ks = jnp.full([batch_size], 2)
+    _, params = self.model.init(key, inputs, input_lengths, ks)
+    return params
+
 

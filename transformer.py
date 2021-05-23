@@ -28,11 +28,11 @@ from jax import vmap
 import jax.experimental
 import jax.experimental.host_callback as hcb
 
-def normalize(inputs, normalization_type):
+def normalize(inputs, normalization_type, name=None):
   if normalization_type == "no_norm":
     return inputs
   elif normalization_type == 'layer_norm':
-    return nn.LayerNorm(inputs, bias=True, scale=False)
+    return nn.LayerNorm(inputs, bias=True, scale=False, name=name)
   elif normalization_type == 'batch_norm':
     return inputs
 
@@ -389,3 +389,152 @@ class EncoderDecoderTransformer(nn.Module):
     # outs is currently [max_target_length, batch_size, target_dim],
     # transpose to put the batch dimension first.
     return jnp.transpose(outs, axes=(1, 0, 2))
+
+
+class ResNet(nn.Module):
+
+  def apply(self,
+            inputs,
+            out_dim=2,
+            activation=jax.nn.relu,
+            hidden_dim=128,
+            num_blocks=2,
+            weight_init=jax.nn.initializers.xavier_normal(),
+            name="fc_net"):
+
+    x = flax.nn.Dense(inputs, hidden_dim, kernel_init=weight_init)
+
+    for _ in range(num_blocks):
+      out = flax.nn.Dense(x, hidden_dim, kernel_init=weight_init)
+      out = activation(out)
+      out = flax.nn.Dense(out, hidden_dim, kernel_init=weight_init)
+      x = activation(out + x)
+
+    out = flax.nn.Dense(x, out_dim)
+    return out
+
+
+
+class ProbedTransformerEncoderStack(nn.Module):
+
+  def apply(self,
+            inputs,
+            mask,
+            num_probe_outs,
+            num_encoders=6,
+            num_heads=8,
+            value_dim=128,
+            activation_fn=flax.nn.relu,
+            normalization=None,
+            weight_init=jax.nn.initializers.xavier_normal()):
+    """Applies a stack of transformer encoder layers.
+
+    Args:
+      inputs: The inputs to the transformer, a
+        [batch_size, max_num_data_points, data_dim] tensor.
+      mask: The mask for the inputs indicating which elements are padding. A
+        tensor of shape [batch_size, max_num_data_points].
+      num_encoders: The number of encoder layers in the stack.
+      num_heads: The number of heads to use for self-attention, defaults to 8.
+      value_dim: The dimension of the transformer's keys, values, and queries.
+      activation_fn: The activation function to use, defaults to relu.
+      weight_init: An initializer for the encoder weights.
+    Returns:
+      outs: A [batch_size, max_num_data_points, value_dim] tensor of outputs.
+    """
+    probe = ResNet.shared(out_dim=num_probe_outs, hidden_dim=64, num_blocks=2, name="probe")
+    inputs = flax.nn.Dense(inputs, features=value_dim, kernel_init=weight_init)
+    probe_outs = [probe(inputs)]
+    for _ in range(num_encoders):
+      inputs = TransformerEncoderLayer(inputs,
+                                       mask,
+                                       activation_fn=activation_fn,
+                                       num_heads=num_heads,
+                                       normalization=normalization,
+                                       weight_init=weight_init)
+      probe_outs.append(probe(inputs))
+    return inputs, probe_outs
+
+
+class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
+
+  def apply(self,
+            inputs,
+            input_lengths,
+            target_lengths,
+            targets=None,
+            target_dim=32,
+            max_target_length=100,
+            num_heads=8,
+            num_encoders=6,
+            num_decoders=6,
+            qkv_dim=512,
+            activation_fn=flax.nn.relu,
+            normalization=None,
+            weight_init=jax.nn.initializers.xavier_uniform()):
+    """Applies Transformer model on the inputs.
+
+    Args:
+      inputs: input data, [batch_size, max_num_data_points, data_dim].
+      input_lengths: A [batch_size] vector containing the number of samples
+        in each batch element.
+      target_lengths: Unused.
+      targets: Unused.
+      target_dim: The length of each output vector.
+      max_target_length: An int at least as large as the largest element of
+        target_lengths, used for determining output shapes.
+      num_heads: The number of heads for the self attention.
+      num_encoders: The number of transformer encoder layers.
+      num_decoders: The number of transformer decoder layers.
+      qkv_dim: The dimension of the query/key/value.
+      activation_fn: The activation function to use, defaults to relu.
+      weight_init: An initializer for the encoder weights.
+    Returns:
+      outs: The transformer output, a tensor of shape
+        [batch_size, max_target_length, target_dim].
+    """
+    batch_size = inputs.shape[0]
+    max_input_length = inputs.shape[1]
+    input_mask = util.make_mask(input_lengths, max_input_length)
+
+    encoder_hs, probe_outs = ProbedTransformerEncoderStack(
+        inputs,
+        input_mask,
+        max_target_length,
+        num_encoders=num_encoders,
+        num_heads=num_heads,
+        value_dim=qkv_dim,
+        normalization=normalization,
+        weight_init=weight_init,
+        name="TransformerEncoderStack_0")
+    # average over data dimension, resulting in [batch_size, data_dim]
+    encoder_out = jnp.mean(encoder_hs, axis=1)
+
+    decoder_out = flax.nn.Dense(encoder_out, features=max_target_length*64, 
+        kernel_init=weight_init, name="Dense_1")
+
+    for i in range(num_decoders):
+      layer_out = activation_fn(flax.nn.Dense(decoder_out,
+                                       features=max_target_length*64,
+                                       kernel_init=weight_init,
+                                       name="Dense_%d" % (i*4 + 2)))
+      layer_out = normalize(layer_out, normalization, name="LayerNorm_%d" % (i*4 + 3))
+
+      layer_out = flax.nn.Dense(layer_out,
+                                features=max_target_length*64,
+                                kernel_init=weight_init,
+                                name="Dense_%d" % (i*4 + 4))
+      layer_out = activation_fn(layer_out)
+      decoder_out = normalize(layer_out + decoder_out, normalization, name="LayerNorm_%d" % (i*4 +
+        5))
+
+
+    # dense layer to arrive at [batch_size, target_length, target_dim]
+    out = flax.nn.Dense(
+        decoder_out,
+        features=target_dim*max_target_length,
+        kernel_init=weight_init,
+        name="Dense_%d" % (num_decoders*4+2))
+    out = jnp.reshape(out, [batch_size, max_target_length, target_dim])
+
+    return out, jnp.array(probe_outs)
