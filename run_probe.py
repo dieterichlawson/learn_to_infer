@@ -182,12 +182,15 @@ def make_loss(model,
           key, "mean_scale_weight", batch_size, min_k, max_k, max_k*data_points_per_mode,
           data_dim, mode_var, cov_dof, cov_prior, dist_mult, noise_pct)
 
+  num_train_points = int(data_points_per_mode * max_k * 0.7)
   def loss(params, key):
     key, subkey = jax.random.split(key)
     xs, _, ks, mog_params = sample_train_batch(key)
-    losses, _, _, _ = model.loss(
+    # kls is [num_layers, batch_size, max_num_data_points]
+    kls, _, _, _ = model.loss(
         params, xs, ks*data_points_per_mode, mog_params, ks, subkey)
-    return jnp.mean(losses)
+    train_kls = kls[:,:,:num_train_points]
+    return jnp.mean(train_kls)
 
   return loss
 
@@ -214,19 +217,25 @@ def make_summarize(
 
   def sample_and_pred(key, params, points_per_mode, min_k, max_k):
     xs, cs, ks, true_gmm_params = sample_eval_batch(key, points_per_mode, min_k, max_k)
-    losses, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
-    # [num_layers]
-    return jnp.mean(losses, axis=-1), jnp.mean(entropy), jnp.mean(guess_ce)
+    kls, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
+    # etnropy and guess_ce will be [num_layers]
+    # kls is [num_layers, batch_Size, max_num_data_points]
+    return kls, jnp.mean(entropy), jnp.mean(guess_ce)
 
   sample_and_pred = jax.jit(sample_and_pred, static_argnums=(2,3,4))
 
   def summarize(writer, step, params, key):
-    losses, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
+    kls, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
+
+    num_train_points = int(data_points_per_mode * max_k * 0.7)
+    train_kls = kls[:,:,:num_train_points]
+    train_kls = jnp.mean(train_kls, axis=(1,2))
+    test_kls = kls[:,:,num_train_points:]
+    test_kls = jnp.mean(test_kls, axis=(1,2))
     print("Entropy: %0.2f" % entropy)
     print("Guessing CE: %0.4f" % guess_ce)
-    for i in range(losses.shape[0]):
-      writer.scalar("layer %d cross-entropy" % (i+1), losses[i], step=step)
-      print("layer %d cross-entropy" % (i+1), losses[i])
+    for i in range(kls.shape[0]):
+      print("layer %d KL train / test: %0.6f / %0.6f" % ((i+1), train_kls[i], test_kls[i]))
 
   return summarize
 

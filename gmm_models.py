@@ -780,7 +780,7 @@ class ProbedMSWUnconditional:
     pred_dist = tfd.Categorical(logits=preds)
     # [num_layers, batch_size, max_num_data_points]
     kl = resp_dist.kl_divergence(pred_dist)
-    return (jnp.mean(kl, axis=-1), jnp.mean(entropy, axis=-1), 
+    return (kl, jnp.mean(entropy, axis=-1), 
         jnp.mean(guess_ce, axis=-1), reps)
 
   def init_params(self, key):
