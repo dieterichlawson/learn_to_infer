@@ -22,26 +22,23 @@ import gmm_eval
 import gmm_models
 import plotting
 import util
-import train
 
 from absl import app
 from absl import flags
 
 import jax
-from jax.config import config
 import jax.numpy as jnp
 
 import flax
 from flax import optim
 from flax.training import checkpoints
 
+import numpy as onp
 import scipy as oscipy
 import matplotlib.pyplot as plt
+import sklearn
+from sklearn.manifold import TSNE
 
-
-flags.DEFINE_boolean("attach_probe", True,
-                     "Load a model and initialize a new probde. If false will attempt to load "
-                     "a combined model and probe from logdir.")
 flags.DEFINE_integer("num_encoders", 6,
                      "Number of encoder modules in the transformer.")
 flags.DEFINE_integer("num_decoders", 6,
@@ -77,20 +74,10 @@ flags.DEFINE_float("mode_var", 1.,
                    "not sampling.")
 flags.DEFINE_float("dist_multiplier", .95,
                    "Confidence interval that will be nonoverlapping when sampling the meaans")
-flags.DEFINE_boolean("parallel", True,
-                     "If possible, train in parallel across devices.")
 flags.DEFINE_integer("batch_size", 64,
                      "The batch size.")
-flags.DEFINE_integer("num_steps", int(1e6),
-                     "The number of steps to train for.")
-flags.DEFINE_float("probe_lr", 1e-3,
-                   "The learning rate for the probe.")
 flags.DEFINE_float("lr", 1e-3,
                    "The learning rate for ADAM.")
-flags.DEFINE_integer("summarize_every", 100,
-                     "Number of steps between summaries.")
-flags.DEFINE_integer("checkpoint_every", 5000,
-                     "Number of steps between checkpoints.")
 flags.DEFINE_string("logdir", "/tmp/transformer",
                     "The directory to put summaries and checkpoints.")
 flags.DEFINE_string("og_logdir", "/tmp/transformer",
@@ -103,7 +90,6 @@ FLAGS = flags.FLAGS
 def attach_probe(
     key,
     logdir,
-    batch_size=2,
     num_encoders=4,
     num_decoders=4,
     num_heads=8,
@@ -127,7 +113,6 @@ def attach_probe(
     assert False, "No checkpoint found in %s" % logdir
  
   new_model = gmm_models.ProbedMSWUnconditional(
-      batch_size=batch_size,
       data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
       normalization="layer_norm", dist="l2")
@@ -143,56 +128,10 @@ def attach_probe(
   
   return new_model, flax.traverse_util.unflatten_dict(new_params_flat)
 
-def make_probe(
+def run_probe(
     key,
-    batch_size=2,
-    num_encoders=4,
-    num_decoders=4,
-    num_heads=8,
-    value_dim=128,
-    data_points_per_mode=25,
-    max_k=10,
-    data_dim=2):
- 
-  model = gmm_models.ProbedMSWUnconditional(
-      batch_size=batch_size,
-      data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
-      num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
-      normalization="layer_norm", dist="l2")
-  init_params = new_model.init_params(key)
-
-  return model, init_params
-
-
-def make_loss(model,
-              min_k=2,
-              max_k=10,
-              noise_pct=None,
-              data_points_per_mode=25,
-              cov_dof=10,
-              cov_prior="inv_wishart",
-              mode_var=1.,
-              dist_mult=2.,
-              data_dim=2,
-              batch_size=128):
-
-  def sample_train_batch(key):
-    key = jax.random.PRNGKey(0)
-    return sample_gmm.sample_batch_random_ks(
-          key, "mean_scale_weight", batch_size, min_k, max_k, max_k*data_points_per_mode,
-          data_dim, mode_var, cov_dof, cov_prior, dist_mult, noise_pct)
-
-  def loss(params, key):
-    key, subkey = jax.random.split(key)
-    xs, _, ks, mog_params = sample_train_batch(key)
-    losses, _, _, _ = model.loss(
-        params, xs, ks*data_points_per_mode, mog_params, ks, subkey)
-    return jnp.mean(losses)
-
-  return loss
-
-def make_summarize(
     model,
+    params,
     min_k=2,
     max_k=10,
     noise_pct=None,
@@ -202,33 +141,16 @@ def make_summarize(
     dist_mult=2.,
     data_dim=2,
     mode_var=1.,
-    batch_size=256):
+    eval_batch_size=256):
   
-  def sample_eval_batch(key, points_per_mode, min_k, max_k):
-    key = jax.random.PRNGKey(0)
-    xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
-            key, "mean_scale_weight", batch_size, min_k, max_k, 
-            max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, 
-            dist_mult, noise_pct)
-    return xs, cs, ks, params
+  xs, cs, ks, true_gmm_params = sample_gmm.sample_batch_random_ks(
+          key, "mean_scale_weight", eval_batch_size, min_k, max_k, 
+          max_k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, 
+          dist_mult, noise_pct)
 
-  def sample_and_pred(key, params, points_per_mode, min_k, max_k):
-    xs, cs, ks, true_gmm_params = sample_eval_batch(key, points_per_mode, min_k, max_k)
-    losses, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
-    # [num_layers]
-    return jnp.mean(losses, axis=-1), jnp.mean(entropy), jnp.mean(guess_ce)
-
-  sample_and_pred = jax.jit(sample_and_pred, static_argnums=(2,3,4))
-
-  def summarize(writer, step, params, key):
-    losses, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
-    print("Entropy: %0.2f" % entropy)
-    print("Guessing CE: %0.4f" % guess_ce)
-    for i in range(losses.shape[0]):
-      writer.scalar("layer %d cross-entropy" % (i+1), losses[i], step=step)
-      print("layer %d cross-entropy" % (i+1), losses[i])
-
-  return summarize
+  _, _, _, activations = model.loss(
+      params, xs, ks*data_points_per_mode, true_gmm_params, ks, key)
+  return cs, activations
 
 
 def make_dirname(config):
@@ -274,11 +196,6 @@ def main(unused_argv):
     FLAGS.min_k = FLAGS.k
     FLAGS.max_k = FLAGS.k
 
-  if FLAGS.parallel and train.can_train_parallel():
-    assert FLAGS.batch_size % jax.local_device_count(
-    ) == 0, "Device count must evenly divide batch_size"
-    FLAGS.batch_size = int(FLAGS.batch_size / jax.local_device_count())
-
   FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
   og_dirname = make_dirname(FLAGS)
@@ -288,11 +205,9 @@ def main(unused_argv):
   
   key = jax.random.PRNGKey(0)
   key, subkey = jax.random.split(key)
-  if FLAGS.attach_probe:
-    model, init_params = attach_probe(
+  model, params = attach_probe(
       key,
       og_logdir,
-      batch_size=FLAGS.batch_size,
       num_encoders=FLAGS.num_encoders,
       num_decoders=FLAGS.num_decoders,
       num_heads=FLAGS.num_heads,
@@ -300,31 +215,10 @@ def main(unused_argv):
       data_points_per_mode=FLAGS.data_points_per_mode,
       max_k=FLAGS.max_k,
       data_dim=FLAGS.data_dim)
-  else:
-    model, init_params = make_model(
-      key,
-      batch_size=FLAGS.batch_size,
-      num_encoders=FLAGS.num_encoders,
-      num_decoders=FLAGS.num_decoders,
-      num_heads=FLAGS.num_heads,
-      value_dim=FLAGS.value_dim_per_head*flags.num_heads,
-      data_points_per_mode=FLAGS.data_points_per_mode,
-      max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim)
-  loss_fn = make_loss(
-      model,
-      min_k=FLAGS.min_k,
-      max_k=FLAGS.max_k,
-      noise_pct=FLAGS.noise_pct,
-      data_points_per_mode=FLAGS.data_points_per_mode,
-      cov_dof=FLAGS.cov_dof,
-      cov_prior=FLAGS.cov_prior,
-      mode_var=FLAGS.mode_var,
-      dist_mult=FLAGS.dist_multiplier,
-      data_dim=FLAGS.data_dim,
-      batch_size=FLAGS.batch_size)
-  summarize_fn = make_summarize(
+  cs, activations = run_probe(
+    subkey,
     model,
+    params,
     min_k=FLAGS.min_k,
     max_k=FLAGS.max_k,
     noise_pct=FLAGS.noise_pct,
@@ -334,19 +228,12 @@ def main(unused_argv):
     dist_mult=FLAGS.dist_multiplier,
     data_dim=FLAGS.data_dim,
     mode_var=FLAGS.mode_var,
-    batch_size=FLAGS.batch_size)
-  train.train_loop(
-      subkey,
-      init_params,
-      loss_fn,
-      parallel=FLAGS.parallel,
-      lr=FLAGS.probe_lr,
-      num_steps=FLAGS.num_steps,
-      summarize_fn=summarize_fn,
-      summarize_every=FLAGS.summarize_every,
-      checkpoint_every=FLAGS.checkpoint_every,
-      clobber_checkpoint=False,
-      logdir=probe_logdir)
+    eval_batch_size=FLAGS.batch_size)
+  onp.save("activations.npy", activations)
+  onp.save("cs.npy", cs)
+  final_acts = activations[-1,0]
+  acts_embedded = TSNE(n_components=2).fit_transform(final_acts)
+
 
 if __name__ == "__main__":
   app.run(main)

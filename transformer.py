@@ -421,6 +421,7 @@ class ProbedTransformerEncoderStack(nn.Module):
             inputs,
             mask,
             num_probe_outs,
+            batch_size=2,
             num_encoders=6,
             num_heads=8,
             value_dim=128,
@@ -442,18 +443,25 @@ class ProbedTransformerEncoderStack(nn.Module):
     Returns:
       outs: A [batch_size, max_num_data_points, value_dim] tensor of outputs.
     """
-    probe = ResNet.shared(out_dim=num_probe_outs, hidden_dim=64, num_blocks=2, name="probe")
     inputs = flax.nn.Dense(inputs, features=value_dim, kernel_init=weight_init)
-    probe_outs = [probe(inputs)]
-    for _ in range(num_encoders):
+    reps = [inputs]
+    
+    probe = flax.nn.DenseGeneral.partial(features=num_probe_outs, batch_dims=(0,))
+    probe_inputs = jax.lax.stop_gradient(inputs)
+    probe_outs = [probe(probe_inputs, name="probe_0")]
+
+    for i in range(num_encoders):
       inputs = TransformerEncoderLayer(inputs,
                                        mask,
                                        activation_fn=activation_fn,
                                        num_heads=num_heads,
                                        normalization=normalization,
                                        weight_init=weight_init)
-      probe_outs.append(probe(inputs))
-    return inputs, probe_outs
+      reps.append(inputs)
+      probe_inputs = jax.lax.stop_gradient(inputs)
+      probe_out = probe(probe_inputs, name="probe_%d" % (i+1))
+      probe_outs.append(probe_out)
+    return inputs, probe_outs, reps
 
 
 class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
@@ -462,6 +470,7 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
             inputs,
             input_lengths,
             target_lengths,
+            batch_size=2,
             targets=None,
             target_dim=32,
             max_target_length=100,
@@ -497,10 +506,11 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
     max_input_length = inputs.shape[1]
     input_mask = util.make_mask(input_lengths, max_input_length)
 
-    encoder_hs, probe_outs = ProbedTransformerEncoderStack(
+    encoder_hs, probe_outs, reps = ProbedTransformerEncoderStack(
         inputs,
         input_mask,
         max_target_length,
+        batch_size=batch_size,
         num_encoders=num_encoders,
         num_heads=num_heads,
         value_dim=qkv_dim,
@@ -537,4 +547,4 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
         name="Dense_%d" % (num_decoders*4+2))
     out = jnp.reshape(out, [batch_size, max_target_length, target_dim])
 
-    return out, jnp.array(probe_outs)
+    return out, jnp.array(probe_outs), jnp.array(reps)

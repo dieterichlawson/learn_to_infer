@@ -699,6 +699,7 @@ class UnconditionalFixedK(FixedKInferenceMachine):
 class ProbedMSWUnconditional:
 
   def __init__(self,
+               batch_size=2,
                data_dim=2,
                max_k=2,
                algo_k=None,
@@ -729,7 +730,9 @@ class ProbedMSWUnconditional:
     """
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
     self.max_k = max_k
+    self.batch_size = batch_size
     self.model = transformer.ProbedUnconditionalEncoderDecoderTransformer.partial(
+        batch_size=batch_size,
         target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
@@ -767,18 +770,18 @@ class ProbedMSWUnconditional:
     
     # [batch_size, max_num_data_points, k]
     log_resps = vmap(gmm_eval.responsibilities)(inputs, true_means, true_covs, true_log_weights)
+    resp_dist = tfd.Categorical(logits=log_resps)
     resps = jnp.exp(log_resps)
-    entropy = jnp.sum(-resps*log_resps, axis=-1)
+    entropy = resp_dist.entropy()
     guess_ce = jnp.sum(-resps*jnp.full_like(resps, jnp.log(1./self.max_k)), axis=-1)
     #[num_layers, batch_size, max_num_data_points, k]
-    _, preds = self.model.call(params, inputs, input_lengths, ks)
-
-    pred_logits = jax.nn.log_softmax(preds, axis=-1)
-    true_probs = jax.lax.stop_gradient(jax.nn.softmax(resps, axis=-1))
+    _, preds, reps = self.model.call(params, inputs, input_lengths, ks)
+    
+    pred_dist = tfd.Categorical(logits=preds)
     # [num_layers, batch_size, max_num_data_points]
-    cross_ent = -jnp.sum(pred_logits*true_probs[jnp.newaxis,...], axis=-1)
-    # [num_layers, batch_size]
-    return jnp.mean(cross_ent, axis=-1), jnp.mean(entropy, axis=-1), jnp.mean(guess_ce, axis=-1)
+    kl = resp_dist.kl_divergence(pred_dist)
+    return (jnp.mean(kl, axis=-1), jnp.mean(entropy, axis=-1), 
+        jnp.mean(guess_ce, axis=-1), reps)
 
   def init_params(self, key):
     """Initializes the parameters of the model using dummy data.
@@ -789,8 +792,8 @@ class ProbedMSWUnconditional:
       params: The parameters of the model.
     """
     key, subkey = jax.random.split(key)
-    batch_size = 1
-    max_num_data_points = 32
+    batch_size = self.batch_size
+    max_num_data_points = 100
     inputs = jax.random.normal(
         subkey, [batch_size, max_num_data_points, self.data_dim])
     input_lengths = jnp.full([batch_size], max_num_data_points)

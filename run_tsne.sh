@@ -16,7 +16,7 @@
 set -e
 set -x
 
-python3 run_probe.py \
+python3 run_tsne.py \
   --data_dim=4 \
   --num_encoders=12 \
   --num_decoders=2 \
@@ -28,10 +28,7 @@ python3 run_probe.py \
   --cov_dof=6 \
   --dist_multiplier=0.68 \
   --dist=l2 \
-  --batch_size=64 \
+  --batch_size=16 \
   --lr=0.1 \
-  --probe_lr=2.0 \
-  --summarize_every=500 \
-  --checkpoint_every=5000 \
   --og_logdir=gs://l2i/deep_exp_2 \
   --tag=9
