@@ -24,59 +24,108 @@ from jax import vmap
 import jax.numpy as jnp
 import jax.scipy as jscipy
 
+import tensorflow_probability
+import tensorflow_probability.substrates.jax as tfp
+tfd = tfp.distributions
 
-@partial(jit, static_argnums=1)
-def em(X, k, T, key):
-  n, _ = X.shape
+
+def em(X, k, T, key, tol, regularization):
+  n, data_dim = X.shape
   # Initialize centroids using k-means++ scheme
-  centroids = kmeans_pp_init(X, k, key)
+  init_centroids = kmeans_pp_init(X, k, key)
   # [k, d, d]
-  covs = jnp.array([jnp.cov(X, rowvar=False)]*k)
+  init_covs = jnp.array([jnp.cov(X, rowvar=False)]*k)
   # centroid mixture weights, [k]
-  log_weights = -jnp.ones(k)*jnp.log(n)
+  init_log_weights = -jnp.ones(k)*jnp.log(n)
 
-  def update_centroids_body(unused_t, state):
-    centroids, covs, log_weights, _ = state
+  init_all_resps = jnp.zeros([T, n, k])
+
+  def em_step(state):
+    t, centroids, covs, log_weights, _, elbo, _, all_resps  = state
     # E step
-    # [n, k]
-    log_ps = vmap(
+
+    # The probability of each data point under each component, 
+    # log p(x=x_i|z_i=k, theta) 
+    # shape [n, k]
+    log_p_xs = vmap(
         jscipy.stats.multivariate_normal.logpdf,
         in_axes=(None, 0, 0))(X, centroids, covs)
-    log_ps = log_ps.T
-    # [n, 1]
-    log_zs = jscipy.special.logsumexp(
-        log_ps + log_weights[jnp.newaxis, :], axis=1, keepdims=True)
+    log_p_xs = log_p_xs.T
 
+
+    expanded_log_ws = log_weights[jnp.newaxis, :]
+
+    # The marginal probability of each data point given the parameters
+    # log(sum_k p(x=x_i|z_i=k, theta) p(z_i=k|theta)) = log p(x=x_i|theta)
+    # shape [n, 1]
+    log_marginal_xs = jscipy.special.logsumexp(
+        log_p_xs + expanded_log_ws, axis=1, keepdims=True)
+
+ 
     # [n, k]
-    log_mem_weights = log_ps + log_weights[jnp.newaxis, :] - log_zs
+    # the responsibilities,
+    # log p(x=x_i|z_i=k, theta) + log p(z_i=k|theta) - log p(x=x_i|theta)
+    # = log p(z_i = k|x=x_i, theta)
+    resps = log_p_xs + expanded_log_ws - log_marginal_xs
+
+    model_dist = tfd.MixtureSameFamily(
+        mixture_distribution=tfd.Categorical(logits=log_weights),
+        components_distribution=tfd.MultivariateNormalFullCovariance(
+            loc=centroids, covariance_matrix=covs))
+    new_elbo = jnp.mean(model_dist.log_prob(X))
+
     # M step
-    # [k]
-    log_ns = jscipy.special.logsumexp(log_mem_weights, axis=0)
-    # [k]
+
+    # Sum the responsibilities over the dataset. 
+    # This is the expected number of datapoints assigned to cluster k
+    # shape [k]
+    log_ns = jscipy.special.logsumexp(resps, axis=0)
+
+    # Compute the new log weights, which is the normalized version of log_ns.
+    # This is the probability that a given data point 
+    # will be assigned to component k.
+    # shape [k]
     log_weights = log_ns - jnp.log(n)
+
     # Compute new centroids
-    # [k, d]
+    # new centroids are sum of the data points weighted by the normalized responsibilities.
+    # mu_k = (sum_i x_i p(z_i=k|x=x_i,theta)) / (sum_i p(z_i=k | x=x_i, theta))
+    # shape [k, d]
     centroids = jnp.sum(
-        (X[:, jnp.newaxis, :] * jnp.exp(log_mem_weights)[:, :, jnp.newaxis]) /
+        (X[:, jnp.newaxis, :] * jnp.exp(resps)[:, :, jnp.newaxis]) /
         jnp.exp(log_ns[jnp.newaxis, :, jnp.newaxis]),
         axis=0)
-    # [n, k, d]
+    
+    # Compute the data with the estimated centroids subtracted.
+    # shape [n, k, d]
     centered_x = X[:, jnp.newaxis, :] - centroids[jnp.newaxis, :, :]
+
+    # Compute the empirical scatter matrix
     # [n, k, d, d]
     outers = jnp.einsum('...i,...j->...ij', centered_x, centered_x)
-    weighted_outers = outers * jnp.exp(log_mem_weights[Ellipsis, jnp.newaxis,
+    weighted_outers = outers * jnp.exp(resps[Ellipsis, jnp.newaxis,
                                                        jnp.newaxis])
+    
+    # Compute covariances as the weighted empirical scatter matrices.
     covs = jnp.sum(
         weighted_outers, axis=0) / jnp.exp(log_ns[:, jnp.newaxis, jnp.newaxis])
-    return (centroids, covs, log_weights, log_mem_weights)
+    covs = covs + jnp.eye(data_dim)*regularization
+    all_resps = jax.ops.index_update(all_resps, t, resps)
+    return (t+1, centroids, covs, log_weights, resps, new_elbo, elbo, all_resps)
 
-  out_centroids, out_covs, _, log_mem_weights = jax.lax.fori_loop(
-      0, T, update_centroids_body,
-      (centroids, covs, log_weights, jnp.zeros([n, k])))
-  return out_centroids, out_covs, log_mem_weights
+  def em_pred(state):
+    t, _, _, _, _, new_elbo, elbo, _ = state
+    return jnp.logical_or(jnp.logical_and(new_elbo - elbo > tol, t < T), t <= 1)
 
 
-@partial(jit, static_argnums=1)
+  num_steps, out_mus, out_covs, out_log_ws, _, final_elbo, _, all_resps = jax.lax.while_loop(
+      em_pred, em_step, 
+      (0, init_centroids, init_covs, init_log_weights, 
+       jnp.zeros([n, k]), 0, -jnp.inf, init_all_resps)
+      )
+  return (out_mus, out_covs, out_log_ws), num_steps, all_resps, final_elbo
+
+
 def kmeans_pp_init(X, k, key):
   keys = jax.random.split(key, num=k)
   n, d = X.shape
