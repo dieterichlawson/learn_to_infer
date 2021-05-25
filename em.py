@@ -23,6 +23,7 @@ from jax import jit
 from jax import vmap
 import jax.numpy as jnp
 import jax.scipy as jscipy
+import jax.experimental.host_callback as hcb
 
 import tensorflow_probability
 import tensorflow_probability.substrates.jax as tfp

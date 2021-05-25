@@ -114,7 +114,8 @@ def generate_data(
     em_regularization):
   
   def compute_true_resps(X, params):
-    mus, covs, log_ws = params
+    mus, scales, log_ws = params
+    covs = jnp.einsum("...ik,...jk->...ij", scales, scales)
     # The probability of each data point under each component, 
     # log p(x=x_i|z_i=k, theta) 
     # shape [n, k]
@@ -168,6 +169,7 @@ def make_model(
   # true_resps are [batch_size, num_data_points, k]
   # em_resps are [batch_size, max_num_steps, num_data_points, k]
   # em_num_steps is [batch_size]
+  # NOTE: params (2nd arg) has scales in it, not covs!
   _, _, true_resps, em_resps, em_num_steps = generate_data(
     key1, batch_size, num_data_points, data_dim, k,
     mode_var, cov_dof, dist_mult, noise_pct,
