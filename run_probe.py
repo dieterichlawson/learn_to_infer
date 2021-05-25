@@ -89,6 +89,8 @@ flags.DEFINE_float("lr", 1e-3,
                    "The learning rate for ADAM.")
 flags.DEFINE_integer("summarize_every", 100,
                      "Number of steps between summaries.")
+flags.DEFINE_integer("num_print_pts", 5,
+                     "Number of points to print.")
 flags.DEFINE_integer("checkpoint_every", 5000,
                      "Number of steps between checkpoints.")
 flags.DEFINE_string("logdir", "/tmp/transformer",
@@ -206,7 +208,8 @@ def make_summarize(
     dist_mult=2.,
     data_dim=2,
     mode_var=1.,
-    batch_size=256):
+    batch_size=256,
+    num_print_pts=5):
   
   def sample_eval_batch(key, points_per_mode, min_k, max_k):
     key = jax.random.PRNGKey(0)
@@ -230,13 +233,35 @@ def make_summarize(
 
     num_train_points = int(data_points_per_mode * max_k * 0.7)
     train_kls = kls[:,:,:num_train_points]
-    train_kls = jnp.mean(train_kls, axis=(1,2))
+    # [num_layers, batch_size]
+    train_kls = jnp.mean(train_kls, axis=-1)
+    spec_train_kls = train_kls[:,:num_print_pts]
+    train_kls = jnp.mean(train_kls[:,num_print_pts:], axis=-1)
+
     test_kls = kls[:,:,num_train_points:]
-    test_kls = jnp.mean(test_kls, axis=(1,2))
+    # [num_layers, batch_size]
+    test_kls = jnp.mean(test_kls, axis=-1)
+    spec_test_kls = test_kls[:,:num_print_pts]
+    test_kls = jnp.mean(test_kls[:,num_print_pts:], axis=-1)
     print("Entropy: %0.2f" % entropy)
     print("Guessing CE: %0.4f" % guess_ce)
     for i in range(kls.shape[0]):
       print("layer %d KL train / test: %0.6f / %0.6f" % ((i+1), train_kls[i], test_kls[i]))
+
+    print("special points train")
+    for i in range(num_print_pts):
+      s = " point %d: " % i
+      for j in range(kls.shape[0]):
+        s += " %0.6f" % spec_train_kls[j,i]
+      print(s)
+    print("special points test")
+    for i in range(num_print_pts):
+      s = " point %d: " % i
+      for j in range(kls.shape[0]):
+        s += " %0.6f" % spec_test_kls[j,i]
+      print(s)
+
+     
 
   return summarize
 
@@ -344,7 +369,8 @@ def main(unused_argv):
     dist_mult=FLAGS.dist_multiplier,
     data_dim=FLAGS.data_dim,
     mode_var=FLAGS.mode_var,
-    batch_size=FLAGS.batch_size)
+    batch_size=FLAGS.batch_size,
+    num_print_pts=FLAGS.num_print_pts)
   train.train_loop(
       subkey,
       init_params,
