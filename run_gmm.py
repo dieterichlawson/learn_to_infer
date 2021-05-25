@@ -365,12 +365,13 @@ def main(unused_argv):
       data_dim=FLAGS.data_dim,
       mode_var=FLAGS.mode_var,
       eval_batch_size=FLAGS.eval_batch_size)
+  lr_fn = util.create_learning_rate_scheduler(base_learning_rate=FLAGS.lr)
   train.train_loop(
       subkey,
       init_params,
       loss_fn,
+      lr_fn,
       parallel=FLAGS.parallel,
-      lr=FLAGS.lr,
       num_steps=FLAGS.num_steps,
       summarize_fn=summarize_fn,
       expensive_summarize_fn=expensive_summarize_fn,

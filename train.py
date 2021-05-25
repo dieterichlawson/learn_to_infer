@@ -45,10 +45,10 @@ def train_loop(
     key,
     init_params,
     loss_fn,
+    lr_fn,
     parallel=True,
     summarize_fn=default_summarize,
     expensive_summarize_fn=default_summarize,
-    lr=1e-4,
     num_steps=int(1e5),
     summarize_every=100,
     expensive_summarize_every=1000,
@@ -67,10 +67,9 @@ def train_loop(
     train_fn = local_train_loop
 
   train_fn(
-      key, init_params, loss_fn,
+      key, init_params, loss_fn, lr_fn,
       summarize_fn=summarize_fn,
       expensive_summarize_fn=expensive_summarize_fn,
-      lr=lr,
       num_steps=num_steps,
       summarize_every=summarize_every,
       expensive_summarize_every=expensive_summarize_every,
@@ -83,9 +82,9 @@ def local_train_loop(
     key,
     init_params,
     loss_fn,
+    lr_fn,
     summarize_fn=default_summarize,
     expensive_summarize_fn=default_summarize,
-    lr=1e-4,
     num_steps=int(1e5),
     summarize_every=100,
     expensive_summarize_every=1000,
@@ -97,8 +96,6 @@ def local_train_loop(
   optimizer = optimizer_def.create(init_params)
   optimizer = util.maybe_load_checkpoint(logdir, optimizer,
                                          clobber_checkpoint=clobber_checkpoint)
-  lr_fn = util.create_learning_rate_scheduler(
-      base_learning_rate=lr)
 
   def train_step(optimizer, key):
     loss_val, loss_grad = jax.value_and_grad(
@@ -161,9 +158,9 @@ def local_train_loop(
 def parallel_train_loop(key,
                         init_params,
                         loss_fn,
+                        lr_fn,
                         summarize_fn=default_summarize,
                         expensive_summarize_fn=default_summarize,
-                        lr=1e-4,
                         num_steps=int(1e5),
                         summarize_every=100,
                         expensive_summarize_every=100,
@@ -179,8 +176,6 @@ def parallel_train_loop(key,
       logdir, local_optimizer, clobber_checkpoint=clobber_checkpoint)
   first_step = local_optimizer.state.step
   repl_optimizer = jax_utils.replicate(local_optimizer)
-
-  lr_fn = util.create_learning_rate_scheduler(base_learning_rate=lr)
 
   @functools.partial(jax.pmap, axis_name="batch", donate_argnums=(0,1))
   def train_step(optimizer, key):

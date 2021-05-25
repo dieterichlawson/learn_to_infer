@@ -183,6 +183,7 @@ def make_loss(model,
           data_dim, mode_var, cov_dof, cov_prior, dist_mult, noise_pct)
 
   num_train_points = int(data_points_per_mode * max_k * 0.7)
+
   def loss(params, key):
     key, subkey = jax.random.split(key)
     xs, _, ks, mog_params = sample_train_batch(key)
@@ -348,8 +349,8 @@ def main(unused_argv):
       subkey,
       init_params,
       loss_fn,
+      lambda t: FLAGS.probe_lr,
       parallel=FLAGS.parallel,
-      lr=FLAGS.probe_lr,
       num_steps=FLAGS.num_steps,
       summarize_fn=summarize_fn,
       summarize_every=FLAGS.summarize_every,
