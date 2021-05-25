@@ -1,4 +1,4 @@
-experiment_name = "deep_exp_3"
+experiment_name = "depth_exp"
 
 command = "python3 learn_to_infer/run_gmm.py"
 
@@ -24,7 +24,6 @@ defaults = {
 }
 
 hparams = [
- { "num_encoders": [6, 12, 16], "min_k": 8, "max_k": 8 , "data_dim":8 },
- { "num_encoders": [6, 12, 16], "min_k": 4, "max_k": 4 , "data_dim":8 },
- { "num_encoders": [6, 12, 16], "min_k": 8, "max_k": 8 , "data_dim":4 },
+ { "num_encoders": [2, 4, 6, 12], "min_k": 8, "max_k": 8 , "data_dim":8 },
+ { "num_encoders": [2, 4, 6, 12], "min_k": 8, "max_k": 8 , "data_dim":4 },
 ]
