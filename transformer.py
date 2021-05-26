@@ -470,6 +470,7 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
             inputs,
             input_lengths,
             target_lengths,
+            probe_out_dim=None,
             batch_size=2,
             targets=None,
             target_dim=32,
@@ -508,7 +509,7 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
     encoder_hs, probe_outs, reps = ProbedTransformerEncoderStack(
         inputs,
         input_mask,
-        max_target_length,
+        probe_out_dim,
         batch_size=batch_size,
         num_encoders=num_encoders,
         num_heads=num_heads,

@@ -731,7 +731,11 @@ class ProbedMSWUnconditional:
     target_dim = 1 + data_dim + int((data_dim*(data_dim+1))/2)
     self.max_k = max_k
     self.batch_size = batch_size
+    self.data_dim = data_dim
+    probe_out_dim = int(max_k + data_dim + data_dim**2)
+
     self.model = transformer.ProbedUnconditionalEncoderDecoderTransformer.partial(
+        probe_out_dim=probe_out_dim,
         batch_size=batch_size,
         target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
@@ -774,13 +778,32 @@ class ProbedMSWUnconditional:
     resps = jnp.exp(log_resps)
     entropy = resp_dist.entropy()
     guess_ce = jnp.sum(-resps*jnp.full_like(resps, jnp.log(1./self.max_k)), axis=-1)
-    #[num_layers, batch_size, max_num_data_points, k]
-    _, preds, reps = self.model.call(params, inputs, input_lengths, ks)
     
-    pred_dist = tfd.Categorical(logits=preds)
+    # preds is [num_layers, batch_size, max_num_data_points, k+data_dim + data+dim^2]
+    _, preds, reps = self.model.call(params, inputs, input_lengths, ks)
+  
+    # [num_layers, batch_size, max_num_data_points, k]
+    resp_preds = preds[:,:,:,:self.max_k]
+    # [num_layers, batch_size, max_num_data_points, data_dim]
+    x_preds = preds[:,:,:,self.max_k:self.max_k + self.data_dim]
+    # [num_layers, batch_size, max_num_data_points, data_dim^2]
+    xxt_preds = preds[:,:,:,self.max_k + self.data_dim:]
+
+    pred_resp_dist = tfd.Categorical(logits=resp_preds)
     # [num_layers, batch_size, max_num_data_points]
-    kl = resp_dist.kl_divergence(pred_dist)
-    return (kl, jnp.mean(entropy, axis=-1), 
+    resp_kl = resp_dist.kl_divergence(pred_resp_dist)
+
+    # [num_layers, batch_size, max_num_data_points]
+    x_sos_loss = jnp.sum(jnp.square(inputs[jnp.newaxis,...] - x_preds), axis=-1)
+   
+    # [batch_size, max_num_data_points, data_dim, data_dim]
+    xxt = jnp.einsum('...i,...j->...ij', inputs, inputs)
+    # [batch_size, max_num_data_points, data_dim*data_dim]
+    xxt = jnp.reshape(xxt, list(xxt.shape[0:2]) + [-1])
+    # [num_layers, batch_size, max_num_data_points]
+    xxt_sos_loss = jnp.sum(jnp.square(xxt[jnp.newaxis,...] - xxt_preds), axis=-1)
+
+    return (resp_kl, x_sos_loss, xxt_sos_loss, jnp.mean(entropy, axis=-1), 
         jnp.mean(guess_ce, axis=-1), reps)
 
   def init_params(self, key):

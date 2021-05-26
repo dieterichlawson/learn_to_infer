@@ -190,10 +190,12 @@ def make_loss(model,
     key, subkey = jax.random.split(key)
     xs, _, ks, mog_params = sample_train_batch(key)
     # kls is [num_layers, batch_size, max_num_data_points]
-    kls, _, _, _ = model.loss(
+    kls, x_sos, xxt_sos, _, _, _ = model.loss(
         params, xs, ks*data_points_per_mode, mog_params, ks, subkey)
     train_kls = kls[:,:,:num_train_points]
-    return jnp.mean(train_kls)
+    train_x_sos = x_sos[:,:,:num_train_points]
+    train_xxt_sos = xxt_sos[:,:,:num_train_points]
+    return jnp.mean(train_kls) + jnp.mean(train_x_sos) + jnp.mean(train_xxt_sos)
 
   return loss
 
@@ -221,46 +223,92 @@ def make_summarize(
 
   def sample_and_pred(key, params, points_per_mode, min_k, max_k):
     xs, cs, ks, true_gmm_params = sample_eval_batch(key, points_per_mode, min_k, max_k)
-    kls, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
+    kls, x_sos, xxt_sos, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
     # etnropy and guess_ce will be [num_layers]
     # kls is [num_layers, batch_Size, max_num_data_points]
-    return kls, jnp.mean(entropy), jnp.mean(guess_ce)
+    return kls, x_sos, xxt_sos, jnp.mean(entropy), jnp.mean(guess_ce)
 
   sample_and_pred = jax.jit(sample_and_pred, static_argnums=(2,3,4))
 
   def summarize(writer, step, params, key):
-    kls, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
+    kls, x_sos, xxt_sos, entropy, guess_ce = sample_and_pred(key, params, data_points_per_mode, min_k, max_k)
 
     num_train_points = int(data_points_per_mode * max_k * 0.7)
     train_kls = kls[:,:,:num_train_points]
+    train_x_sos = x_sos[:,:,:num_train_points]
+    train_xxt_sos = xxt_sos[:,:,:num_train_points]
+
     # [num_layers, batch_size]
     train_kls = jnp.mean(train_kls, axis=-1)
     spec_train_kls = train_kls[:,:num_print_pts]
     train_kls = jnp.mean(train_kls[:,num_print_pts:], axis=-1)
+    
+    # [num_layers, batch_size]
+    train_x_sos = jnp.mean(train_x_sos, axis=-1)
+    spec_train_x_sos = train_x_sos[:,:num_print_pts]
+    train_x_sos = jnp.mean(train_x_sos[:,num_print_pts:], axis=-1)
+
+    # [num_layers, batch_size]
+    train_xxt_sos = jnp.mean(train_xxt_sos, axis=-1)
+    spec_train_xxt_sos = train_xxt_sos[:,:num_print_pts]
+    train_xxt_sos = jnp.mean(train_xxt_sos[:,num_print_pts:], axis=-1)
+
 
     test_kls = kls[:,:,num_train_points:]
+    test_x_sos = x_sos[:,:,num_train_points:]
+    test_xxt_sos = xxt_sos[:,:,num_train_points:]
+
     # [num_layers, batch_size]
     test_kls = jnp.mean(test_kls, axis=-1)
     spec_test_kls = test_kls[:,:num_print_pts]
     test_kls = jnp.mean(test_kls[:,num_print_pts:], axis=-1)
+
+    # [num_layers, batch_size]
+    test_x_sos = jnp.mean(test_x_sos, axis=-1)
+    spec_test_x_sos = test_x_sos[:,:num_print_pts]
+    test_x_sos = jnp.mean(test_x_sos[:,num_print_pts:], axis=-1)
+
+    # [num_layers, batch_size]
+    test_xxt_sos = jnp.mean(test_xxt_sos, axis=-1)
+    spec_test_xxt_sos = test_xxt_sos[:,:num_print_pts]
+    test_xxt_sos = jnp.mean(test_xxt_sos[:,num_print_pts:], axis=-1)
+
+
     print("Entropy: %0.2f" % entropy)
     print("Guessing CE: %0.4f" % guess_ce)
     for i in range(kls.shape[0]):
-      print("layer %d KL train / test: %0.6f / %0.6f" % ((i+1), train_kls[i], test_kls[i]))
+      print("layer %d" % (i+1))
+      print("  KL train / test: %0.6f / %0.6f" % (train_kls[i], test_kls[i]))
+      print("  x sos err train / test: %0.6f / %0.6f" % (train_x_sos[i], test_x_sos[i]))
+      print("  xx^T sos err train / test: %0.6f / %0.6f" % (train_xxt_sos[i], test_xxt_sos[i]))
 
     print("special points train")
     for i in range(num_print_pts):
-      s = " point %d: " % i
+      print("  point %d", % i)
+      s_kl =  "         kl: " % i
+      s_x =   "      x err: " % i
+      s_xxt = "    xxt err: " % i
       for j in range(kls.shape[0]):
-        s += " %0.6f" % spec_train_kls[j,i]
-      print(s)
+        s_kl += " %0.6f" % spec_train_kls[j,i]
+        s_x += " %0.6f" % spec_train_x_sos[j,i]
+        s_xxt += " %0.6f" % spec_train_xxt_sos[j,i]
+      print(s_kl)
+      print(s_x)
+      print(s_xxt)
+
     print("special points test")
     for i in range(num_print_pts):
-      s = " point %d: " % i
+      print("  point %d" % i)
+      s_kl =  "         kl: " % i
+      s_x =   "      x err: " % i
+      s_xxt = "    xxt err: " % i
       for j in range(kls.shape[0]):
-        s += " %0.6f" % spec_test_kls[j,i]
-      print(s)
-
+        s_kl += " %0.6f" % spec_test_kls[j,i]
+        s_x += " %0.6f" % spec_test_x_sos[j,i]
+        s_xxt += " %0.6f" % spec_test_xxt_sos[j,i]
+      print(s_kl)
+      print(s_x)
+      print(s_xxt)
      
 
   return summarize
