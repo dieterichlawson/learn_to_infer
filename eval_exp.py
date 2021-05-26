@@ -45,6 +45,9 @@ import pickle
 flags.DEFINE_string("exp", None, "Experiment to evaluate.")
 flags.DEFINE_integer("eval_batch_size", 256,
                      "The batch size for evaluation.")
+flags.DEFINE_string("ppms", None, "The ppms to eval on.")
+flags.DEFINE_boolean("noisy", False, "Whether to include noise in logdir or not.")
+
 flags.DEFINE_integer("num_batches", 8,
                      "The number of batches to split eval_batch_size up into.")
 
@@ -81,18 +84,19 @@ def eval_model(
   dist_mult,
   data_dim,
   mode_var,
-  eval_batch_size):
+  eval_batch_size,
+  noise_pct):
 
   def sample_eval_batch(key, points_per_mode, min_k, max_k):
     if min_k != max_k:
       xs, cs, ks, params = sample_gmm.sample_batch_random_ks(
           key, sampling_types[model_name], eval_batch_size, min_k, max_k, 
-          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult, None)
+          2 * max_k * points_per_mode, data_dim, mode_var, cov_dof, cov_prior, dist_mult, noise_pct)
     else:
       ks = jnp.full([eval_batch_size], max_k)
       xs, cs, params = sample_gmm.sample_batch_fixed_ks(
         key, sampling_types[model_name], ks, max_k, 2 * max_k * points_per_mode, 
-        data_dim, mode_var, cov_dof, cov_prior, dist_mult, None)
+        data_dim, mode_var, cov_dof, cov_prior, dist_mult, noise_pct)
     train_xs = xs[:, :max_k * points_per_mode]
     test_xs = xs[:, max_k * points_per_mode:]
     train_cs = cs[:, :max_k * points_per_mode]
@@ -149,7 +153,8 @@ def eval_model_in_batches(
   data_dim,
   mode_var,
   eval_batch_size,
-  num_batches):
+  num_batches,
+  noise_pct):
  
   assert eval_batch_size % num_batches == 0
   minibatch_size = eval_batch_size // num_batches
@@ -158,7 +163,7 @@ def eval_model_in_batches(
   em_metrics = onp.zeros([eval_batch_size, 6])
 
   eval_fn = lambda k: eval_model(k, model, params, model_name, min_k, max_k, data_points_per_mode,
-      cov_dof, cov_prior, dist_mult, data_dim, mode_var, minibatch_size)
+      cov_dof, cov_prior, dist_mult, data_dim, mode_var, minibatch_size, noise_pct)
   eval_fn = jax.jit(eval_fn)
 
   for i in range(num_batches):
@@ -170,28 +175,54 @@ def eval_model_in_batches(
   return tfmr_metrics, em_metrics
  
 def make_expdir(config):
-  exp_dir = (
-      "%s"
-      "_nheads_%d"
-      "_nenc_%d"
-      "_ndec_%d"
-      "_sepm_%0.2f"
-      "_data_dim_%d"
-      "_mink_%d"
-      "_maxk_%d"
-      "_dps_per_k_%d"
-      "_cov_prior_%s"
-      "_cov_dof_%d"
-      "_%s"
-      "_dist_%s"
-      "_lr_%0.3f"
-      "_tpu%s" % (
-        config.model_name,
-        config.num_heads, config.num_encoders, config.num_decoders, 
-        config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
-        config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
-      )
+  if FLAGS.noisy:
+    exp_dir = (
+        "%s"
+        "_nheads_%d"
+        "_nenc_%d"
+        "_ndec_%d"
+        "_sepm_%0.2f"
+        "_data_dim_%d"
+        "_mink_%d"
+        "_maxk_%d"
+        "_nsy_%0.2f"
+        "_dps_per_k_%d"
+        "_cov_prior_%s"
+        "_cov_dof_%d"
+        "_%s"
+        "_dist_%s"
+        "_lr_%0.3f"
+        "_tpu%s" % (
+          config.model_name,
+          config.num_heads, config.num_encoders, config.num_decoders, 
+          config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
+          config.noise_pct or 0.,
+          config.data_points_per_mode, config.cov_prior, 
+          config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
+        )
+  else:
+    exp_dir = (
+        "%s"
+        "_nheads_%d"
+        "_nenc_%d"
+        "_ndec_%d"
+        "_sepm_%0.2f"
+        "_data_dim_%d"
+        "_mink_%d"
+        "_maxk_%d"
+        "_dps_per_k_%d"
+        "_cov_prior_%s"
+        "_cov_dof_%d"
+        "_%s"
+        "_dist_%s"
+        "_lr_%0.3f"
+        "_tpu%s" % (
+          config.model_name,
+          config.num_heads, config.num_encoders, config.num_decoders, 
+          config.dist_multiplier, config.data_dim, config.min_k, config.max_k,
+          config.data_points_per_mode, config.cov_prior, 
+          config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
+        )
   return exp_dir
 
 def make_logdir(config):
@@ -210,6 +241,8 @@ def normalize_configs(cs):
       c.mode_var = 1.
     if "cov_dof" not in dir(c):
       c.cov_dof = c.data_dim + 2
+    if "noise_pct" not in dir(c):
+      c.noise_pct = None
 
 
 def load_model(c):
@@ -229,21 +262,29 @@ def main(unused_argv):
   configs = [SimpleNamespace(**d) for d in hparams]
   normalize_configs(configs)
   metrics = defaultdict(dict)
+  if FLAGS.ppms is not None:
+    ppms = util.parse_int_list(FLAGS.ppms)
+  else:
+    ppms = [config.data_points_per_mode]
+
   for config in configs:
     model, params = load_model(config)
-    key, k1 = jax.random.split(key)
-    metrics[make_expdir(config)] = eval_model_in_batches(k1, model, params,
-        config.model_name,
-        config.min_k,
-        config.max_k,
-        config.data_points_per_mode,
-        config.cov_dof,
-        config.cov_prior,
-        config.dist_multiplier,
-        config.data_dim,
-        config.mode_var,
-        FLAGS.eval_batch_size,
-        FLAGS.num_batches)
+    for ppm in ppms:
+      key, k1 = jax.random.split(key)
+      k = make_expdir(config) + ("_ppm_%d" % ppm)
+      metrics[k] = eval_model_in_batches(k1, model, params,
+          config.model_name,
+          config.min_k,
+          config.max_k,
+          ppm,
+          config.cov_dof,
+          config.cov_prior,
+          config.dist_multiplier,
+          config.data_dim,
+          config.mode_var,
+          FLAGS.eval_batch_size,
+          FLAGS.num_batches,
+          config.noise_pct)
   f = open("out.pkl", 'wb')
   pickle.dump(metrics, f)
   f.close()
