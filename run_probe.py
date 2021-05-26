@@ -284,7 +284,7 @@ def make_summarize(
 
     print("special points train")
     for i in range(num_print_pts):
-      print("  point %d", % i)
+      print("  point %d" % i)
       s_kl =  "         kl: " % i
       s_x =   "      x err: " % i
       s_xxt = "    xxt err: " % i
