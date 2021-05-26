@@ -16,13 +16,12 @@
 set -e
 set -x
 
-python3 run_tsne.py \
+python3 get_act_trajectories.py \
   --data_dim=4 \
   --num_encoders=12 \
   --num_decoders=2 \
   --num_heads=16 \
-  --min_k=8 \
-  --max_k=8 \
+  --k=8 \
   --data_points_per_mode=155 \
   --cov_prior=inv_wishart \
   --cov_dof=6 \

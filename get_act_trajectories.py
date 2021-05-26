@@ -22,11 +22,13 @@ import gmm_eval
 import gmm_models
 import plotting
 import util
+import em
 
 from absl import app
 from absl import flags
 
 import jax
+from jax import vmap
 import jax.numpy as jnp
 
 import flax
@@ -35,55 +37,73 @@ from flax.training import checkpoints
 
 import numpy as onp
 import scipy as oscipy
-import matplotlib.pyplot as plt
-import sklearn
-from sklearn.manifold import TSNE
 
-flags.DEFINE_integer("num_encoders", 6,
-                     "Number of encoder modules in the transformer.")
-flags.DEFINE_integer("num_decoders", 6,
-                     "Number of decoder modules in the transformer.")
-flags.DEFINE_integer("num_heads", 8,
-                     "Number of attention heads in the transformer.")
-flags.DEFINE_integer("key_dim", 32,
-                     "The dimension of the keys in the transformer.")
-flags.DEFINE_integer("value_dim_per_head", 32,
-                     "The dimension of the values in the transformer "
-                     "for each head.")
-flags.DEFINE_integer("data_dim", 2,
-                     "The dimension of the points to cluster.")
-flags.DEFINE_integer("k", None,
-                     "The number of modes in the data. If provided, overrides min_k and max_k.")
-flags.DEFINE_integer("min_k", 2,
-                     "The minimum number of modes in the data.")
-flags.DEFINE_integer("max_k", 10,
-                     "the maximum number of modes in the data.")
-flags.DEFINE_float("noise_pct", None,
-                   "The percentage of the datasets that will be noise points.")
-flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
-                  "The distance function used to measure similarity of components in the loss.")
-flags.DEFINE_integer("data_points_per_mode", 25,
-                     "Number of data points to include per mode in the data.")
-flags.DEFINE_integer("cov_dof", None,
-                     "Degrees of freedom in sampling the random covariances.")
-flags.DEFINE_enum("cov_prior", "inv_wishart",
-                  ["inv_wishart", "wishart"],
-                  "The prior to use for the covariance matrix.")
-flags.DEFINE_float("mode_var", 1.,
-                   "The variance of the modes in the GMM used when "
-                   "not sampling.")
-flags.DEFINE_float("dist_multiplier", .95,
-                   "Confidence interval that will be nonoverlapping when sampling the meaans")
-flags.DEFINE_integer("batch_size", 64,
-                     "The batch size.")
-flags.DEFINE_float("lr", 1e-3,
-                   "The learning rate for ADAM.")
-flags.DEFINE_string("logdir", "/tmp/transformer",
-                    "The directory to put summaries and checkpoints.")
-flags.DEFINE_string("og_logdir", "/tmp/transformer",
-                    "The directory containing the checkpoint to probe.")
-flags.DEFINE_string("tag", "",
-                    "String to append to the logdir.")
+flags.DEFINE_integer(
+    "num_encoders", 6,
+    "Number of encoder modules in the transformer.")
+flags.DEFINE_integer(
+    "num_decoders", 6,
+    "Number of decoder modules in the transformer.")
+flags.DEFINE_integer(
+    "num_heads", 8,
+    "Number of attention heads in the transformer.")
+flags.DEFINE_integer(
+    "key_dim", 32,
+    "The dimension of the keys in the transformer.")
+flags.DEFINE_integer(
+    "value_dim_per_head", 32,
+    "The dimension of the values in the transformer for each head.")
+flags.DEFINE_integer(
+    "data_dim", 2,
+    "The dimension of the points to cluster.")
+flags.DEFINE_integer(
+    "k", None,
+    "The number of modes in the data.")
+flags.DEFINE_float(
+    "noise_pct", None,
+    "The percentage of the datasets that will be noise points.")
+flags.DEFINE_enum(
+    "dist", "l2", ["l2", "kl", "symm_kl"],
+    "The distance function used to measure similarity of components in the loss.")
+flags.DEFINE_integer(
+    "data_points_per_mode", 25,
+    "Number of data points to include per mode in the data.")
+flags.DEFINE_integer(
+    "cov_dof", None,
+    "Degrees of freedom in sampling the random covariances.")
+flags.DEFINE_enum(
+    "cov_prior", "inv_wishart", ["inv_wishart", "wishart"],
+    "The prior to use for the covariance matrix.")
+flags.DEFINE_float(
+    "mode_var", 1.,
+    "The variance of the modes in the GMM used when not sampling.")
+flags.DEFINE_float(
+    "dist_multiplier", .95,
+    "Confidence interval that will be nonoverlapping when sampling the meaans")
+flags.DEFINE_integer(
+    "batch_size", 64,
+    "The batch size.")
+flags.DEFINE_float(
+    "lr", 1e-3,
+    "The learning rate for ADAM.")
+flags.DEFINE_string(
+    "logdir", "/tmp/transformer",
+    "The directory to put summaries and checkpoints.")
+flags.DEFINE_string(
+    "og_logdir", "/tmp/transformer",
+    "The directory containing the checkpoint to probe.")
+flags.DEFINE_string(
+    "tag", "",
+    "String to append to the logdir.")
+flags.DEFINE_float(
+    "em_tol", 1e-5,
+    "Tolerance for EM.")
+flags.DEFINE_float(
+    "em_reg", 1e-4,
+    "Regularization for EM.")
+flags.DEFINE_integer(
+    "max_em_steps", 200,
+    "Max number of steps EM can take.")
 
 FLAGS = flags.FLAGS
 
@@ -95,11 +115,12 @@ def attach_probe(
     num_heads=8,
     value_dim=128,
     data_points_per_mode=25,
-    max_k=10,
-    data_dim=2):
+    k=10,
+    data_dim=2,
+    batch_size=2):
   key1, key2 = jax.random.split(key)
   old_model = gmm_models.MSWUnconditional(
-      data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
+      data_dim=data_dim, max_k=k, algo_k=k, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
       normalization="layer_norm", dist="l2")
   init_params = old_model.init_params(key1)
@@ -113,7 +134,8 @@ def attach_probe(
     assert False, "No checkpoint found in %s" % logdir
  
   new_model = gmm_models.ProbedMSWUnconditional(
-      data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
+      batch_size=batch_size,
+      data_dim=data_dim, max_k=k, algo_k=k, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
       normalization="layer_norm", dist="l2")
   new_init_params = new_model.init_params(key2)
@@ -132,8 +154,7 @@ def run_probe(
     key,
     model,
     params,
-    min_k=2,
-    max_k=10,
+    k=2,
     noise_pct=None,
     data_points_per_mode=50,
     cov_dof=10,
@@ -141,16 +162,24 @@ def run_probe(
     dist_mult=2.,
     data_dim=2,
     mode_var=1.,
-    eval_batch_size=256):
+    batch_size=256,
+    em_tol=1e-5,
+    em_reg=1e-4,
+    max_em_steps=200):
   
   xs, cs, ks, true_gmm_params = sample_gmm.sample_batch_random_ks(
-          key, "mean_scale_weight", eval_batch_size, min_k, max_k, 
-          max_k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, 
+          key, "mean_scale_weight", batch_size, k, k, 
+          k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, 
           dist_mult, noise_pct)
 
   _, _, _, activations = model.loss(
       params, xs, ks*data_points_per_mode, true_gmm_params, ks, key)
-  return cs, activations
+
+  batch_em = vmap(em.em, in_axes=(0, None, None, 0, None, None))
+  em_params, em_num_steps, em_resps, final_elbo,_ = batch_em(
+      xs, k, max_em_steps, jax.random.split(key, num=batch_size), em_tol, em_reg)
+  em_resps = em_resps[:,:jnp.max(em_num_steps)]
+  return cs, activations, em_resps, em_num_steps
 
 
 def make_dirname(config):
@@ -173,7 +202,7 @@ def make_dirname(config):
       "_tpu%s" % (
        "msw_unconditional", 
         config.num_heads, config.num_encoders, config.num_decoders, 
-        config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
+        config.dist_multiplier, config.data_dim, config.k, config.k, 
         config.noise_pct or 0.,
         config.data_points_per_mode, config.cov_prior, 
         config.cov_dof, "layer_norm", "l2", config.lr, config.tag)
@@ -192,9 +221,6 @@ def main(unused_argv):
 
   assert FLAGS.cov_dof >= FLAGS.data_dim + 2, "Wishart DOF must be >= 2 + data dim."
 
-  if FLAGS.k is not None:
-    FLAGS.min_k = FLAGS.k
-    FLAGS.max_k = FLAGS.k
 
   FLAGS.dist_multiplier = oscipy.stats.chi2.ppf(FLAGS.dist_multiplier, df=FLAGS.data_dim)
 
@@ -213,14 +239,14 @@ def main(unused_argv):
       num_heads=FLAGS.num_heads,
       value_dim=FLAGS.value_dim_per_head*FLAGS.num_heads,
       data_points_per_mode=FLAGS.data_points_per_mode,
-      max_k=FLAGS.max_k,
-      data_dim=FLAGS.data_dim)
-  cs, activations = run_probe(
+      k=FLAGS.k,
+      data_dim=FLAGS.data_dim,
+      batch_size=FLAGS.batch_size)
+  cs, activations, em_resps, em_num_steps = run_probe(
     subkey,
     model,
     params,
-    min_k=FLAGS.min_k,
-    max_k=FLAGS.max_k,
+    k=FLAGS.k,
     noise_pct=FLAGS.noise_pct,
     data_points_per_mode=FLAGS.data_points_per_mode,
     cov_dof=FLAGS.cov_dof,
@@ -228,11 +254,13 @@ def main(unused_argv):
     dist_mult=FLAGS.dist_multiplier,
     data_dim=FLAGS.data_dim,
     mode_var=FLAGS.mode_var,
-    eval_batch_size=FLAGS.batch_size)
-  onp.save("activations.npy", activations)
-  onp.save("cs.npy", cs)
-  final_acts = activations[-1,0]
-  acts_embedded = TSNE(n_components=2).fit_transform(final_acts)
+    batch_size=FLAGS.batch_size,
+    em_tol=FLAGS.em_tol,
+    em_reg=FLAGS.em_reg,
+    max_em_steps=FLAGS.max_em_steps)
+
+  onp.savez('probe.npz', 
+      tfmr_acts=activations, true_cs=cs, em_resps=em_resps, em_num_steps=em_num_steps)
 
 
 if __name__ == "__main__":

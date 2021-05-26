@@ -502,7 +502,6 @@ class ProbedUnconditionalEncoderDecoderTransformer(nn.Module):
       outs: The transformer output, a tensor of shape
         [batch_size, max_target_length, target_dim].
     """
-    batch_size = inputs.shape[0]
     max_input_length = inputs.shape[1]
     input_mask = util.make_mask(input_lengths, max_input_length)
 

@@ -119,12 +119,12 @@ def em(X, k, T, key, tol, regularization):
     return jnp.logical_or(jnp.logical_and(new_elbo - elbo > tol, t < T), t <= 1)
 
 
-  num_steps, out_mus, out_covs, out_log_ws, _, final_elbo, _, all_resps = jax.lax.while_loop(
+  num_steps, out_mus, out_covs, out_log_ws, final_resps, final_elbo, _, all_resps = jax.lax.while_loop(
       em_pred, em_step, 
       (0, init_centroids, init_covs, init_log_weights, 
        jnp.zeros([n, k]), 0, -jnp.inf, init_all_resps)
       )
-  return (out_mus, out_covs, out_log_ws), num_steps, all_resps, final_elbo
+  return (out_mus, out_covs, out_log_ws), num_steps, all_resps, final_elbo, final_resps
 
 
 def kmeans_pp_init(X, k, key):
