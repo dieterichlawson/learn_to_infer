@@ -265,10 +265,12 @@ def main(unused_argv):
   if FLAGS.ppms is not None:
     ppms = util.parse_int_list(FLAGS.ppms)
   else:
-    ppms = [config.data_points_per_mode]
+    ppms = None
 
   for config in configs:
     model, params = load_model(config)
+    if FLAGS.ppms is None:
+      ppms = [config.data_points_per_mode]
     for ppm in ppms:
       key, k1 = jax.random.split(key)
       k = make_expdir(config) + ("_ppm_%d" % ppm)
