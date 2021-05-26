@@ -39,22 +39,14 @@ import numpy as onp
 
 import scipy as oscipy
 import matplotlib.pyplot as plt
+import pickle
 
 
 flags.DEFINE_string("exp", None, "Experiment to evaluate.")
-flags.DEFINE_string("test_data_points_per_mode", None,
-                     "Number of data points per mode in the test data, defaults to"
-                     " data_points_per_mode.")
-flags.DEFINE_string("test_ks", None,
-                     "Ks to test model performance on.")
-flags.DEFINE_integer("cov_dof", None,
-                     "Degrees of freedom in sampling the random covariances.")
 flags.DEFINE_integer("eval_batch_size", 256,
                      "The batch size for evaluation.")
 flags.DEFINE_integer("num_batches", 8,
                      "The number of batches to split eval_batch_size up into.")
-flags.DEFINE_string("logdir", "/tmp/transformer",
-                    "The directory to put summaries and checkpoints.")
 
 FLAGS = flags.FLAGS
 
@@ -126,20 +118,20 @@ def eval_model(
   train_xs, test_xs, train_cs, test_cs, ks, _ = sample_eval_batch(
       key, data_points_per_mode, min_k, max_k)
 
-  em_metrics = gmm_eval.compute_masked_baseline_metrics(
-      train_xs, train_cs, test_xs, test_cs, sampling_types[model_name], mode_var, 
-      ks, ks*data_points_per_mode)
+  em_metrics = gmm_eval.compute_baseline_metrics(
+      key, train_xs, train_cs, test_xs, test_cs, min_k)
   
   tfmr_train_cs, tfmr_gmm_params = model_classify(params, train_xs, ks, data_points_per_mode)
   tfmr_test_cs = jax.vmap(gmm_models.masked_classify_points)(
             test_xs, tfmr_gmm_params[0], tfmr_gmm_params[1], tfmr_gmm_params[2], ks)
 
-  tfmr_train_acc, tfmr_train_f1, tfmr_train_ll = gmm_eval.batch_metrics(
+  tfmr_train_accs, tfmr_train_f1s, tfmr_train_lls = gmm_eval.batch_metrics(
         train_xs, tfmr_gmm_params, train_cs, tfmr_train_cs, ks*data_points_per_mode, ks)
-  tfmr_test_acc, tfmr_test_f1, tfmr_test_ll = gmm_eval.batch_metrics(
+  tfmr_test_accs, tfmr_test_f1s, tfmr_test_lls = gmm_eval.batch_metrics(
         test_xs, tfmr_gmm_params, test_cs, tfmr_test_cs, ks*data_points_per_mode, ks)
-  tfmr_metrics = (tfmr_train_acc, tfmr_test_acc, tfmr_train_f1, tfmr_test_f1, 
-      tfmr_train_ll, tfmr_test_ll)
+
+  tfmr_metrics = (tfmr_train_accs, tfmr_test_accs, tfmr_train_f1s, tfmr_test_f1s, 
+      tfmr_train_lls, tfmr_test_lls)
   return tfmr_metrics, em_metrics
 
 
@@ -160,21 +152,26 @@ def eval_model_in_batches(
   num_batches):
  
   assert eval_batch_size % num_batches == 0
+  minibatch_size = eval_batch_size // num_batches
 
-  tfmr_metrics = onp.zeros([6])
-  em_metrics = onp.zeros([6])
+  tfmr_metrics = onp.zeros([eval_batch_size, 6])
+  em_metrics = onp.zeros([eval_batch_size, 6])
+
+  eval_fn = lambda k: eval_model(k, model, params, model_name, min_k, max_k, data_points_per_mode,
+      cov_dof, cov_prior, dist_mult, data_dim, mode_var, minibatch_size)
+  eval_fn = jax.jit(eval_fn)
 
   for i in range(num_batches):
-    key, k1 = jax.random.split(key)
+    key, subkey = jax.random.split(key)
+    tfmr_ms, em_ms = eval_fn(subkey)
 
-    tfmr_ms, em_ms = eval_model(k1, model, params, model_name, min_k, max_k, 
-        data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
-        eval_batch_size // num_batches)
-    tfmr_metrics += tfmr_ms
-    em_metrics += em_ms
+    #tfmr_ms, em_ms = eval_model(k1, model, params, model_name, min_k, max_k, 
+    #    data_points_per_mode, cov_dof, cov_prior, dist_mult, data_dim, mode_var, 
+    #    minibatch_size)
+    tfmr_metrics[i*minibatch_size:(i+1)*minibatch_size] = onp.array(tfmr_ms).T
+    em_metrics[i*minibatch_size:(i+1)*minibatch_size] = onp.array(em_ms).T
 
-  return tfmr_metrics / num_batches, em_metrics / num_batches
-
+  return tfmr_metrics, em_metrics
   
 
 def print_tables(vals, num_digits=2):
@@ -262,7 +259,7 @@ def main(unused_argv):
   configs = [SimpleNamespace(**d) for d in hparams]
   normalize_configs(configs)
   metrics = defaultdict(dict)
-  for config in configs:
+  for config in configs[0:4]:
     model, params = load_model(config)
     key, k1 = jax.random.split(key)
     metrics[config.data_dim][config.min_k] = eval_model_in_batches(k1, model, params,
@@ -277,7 +274,12 @@ def main(unused_argv):
         config.mode_var,
         FLAGS.eval_batch_size,
         FLAGS.num_batches)
-  print_tables(metrics, metrics)
+  f = open("out.pkl", 'wb')
+  pickle.dump(metrics, f)
+  f.close()
+
+  #print_tables(metrics, metrics)
+
 
 if __name__ == "__main__":
   app.run(main)

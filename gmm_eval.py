@@ -17,6 +17,7 @@
 """
 import collections
 import functools
+from functools import partial
 import itertools
 
 import jax
@@ -29,6 +30,7 @@ import sklearn.metrics
 import sklearn.mixture
 
 import gmm_models
+import em
 
 import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
@@ -117,7 +119,7 @@ def batch_metrics(xs, pred_params, true_cs, pred_cs, num_points, ks):
   pred_mus, pred_covs, pred_log_ws = pred_params
   pred_lls = vmap(masked_log_marginal_per_x)(
       xs, pred_mus, pred_covs, pred_log_ws, masks, ks)
-  return jnp.mean(accs), jnp.mean(f1s), jnp.mean(pred_lls)
+  return accs, f1s, pred_lls
 
 def metrics(xs, pred_params, true_cs, pred_cs, num_points, ks):
   acc, f1, mask = classification_metrics(true_cs, pred_cs, num_points)
@@ -173,6 +175,30 @@ def agglomerative_fit_and_predict(xs, num_modes):
   return sklearn.cluster.AgglomerativeClustering(
       n_clusters=num_modes,
       affinity="euclidean").fit_predict(xs)
+
+@partial(jax.jit, static_argnums=(5,))
+def compute_baseline_metrics(
+    key, train_xs, train_cs, test_xs, test_cs, num_modes):
+  batch_size, num_data_points, _ = train_xs.shape
+  batch_em = vmap(em.em, in_axes=(0, None, None, 0, None, None))
+  em_tol = 1e-5
+  em_reg = 1e-4
+  em_max_num_steps = 200
+  pred_params, _, _, _, train_resps = batch_em(
+      train_xs, num_modes, em_max_num_steps, jax.random.split(key, num=batch_size), em_tol, em_reg)
+  
+  #[batch_size, num_data_points]
+  train_pred_cs = jnp.argmax(train_resps, axis=-1)
+  pred_mus, pred_covs, pred_log_ws = pred_params
+  test_pred_cs = vmap(gmm_models.masked_classify_points, in_axes=(0,0,0,0,None))(
+      test_xs, pred_mus, pred_covs, pred_log_ws, num_modes)
+
+  train_accs, train_f1s, train_lls = vmap(metrics, in_axes=(0, 0, 0, 0, None, None))(
+    train_xs, pred_params, train_cs, train_pred_cs, num_data_points, num_modes)
+  test_accs, test_f1s, test_lls = vmap(metrics, in_axes=(0, 0, 0, 0, None, None))(
+    test_xs, pred_params, test_cs, test_pred_cs, num_data_points, num_modes)
+  return (train_accs, test_accs, train_f1s, 
+      test_f1s, train_lls, test_lls)
 
 def compute_masked_baseline_metrics(
     train_xs, train_cs, test_xs, test_cs, prob_type, mode_var, num_modes, num_points):
