@@ -31,6 +31,13 @@ import jax.scipy as jscipy
 import tensorflow_probability as tfp
 tfd = tfp.substrates.jax.distributions
 
+from flax.nn.activation import softmax
+from flax.nn.base import Collection, Module, collection_from_iterable, iterate_collection
+from flax.nn.initializers import zeros
+from flax.nn.stochastic import make_rng
+from flax.nn.linear import DenseGeneral, default_kernel_init
+from flax import struct
+
 
 def masked_classify_points(xs, means, covs, log_weights, k):
   log_p_fn = jscipy.stats.multivariate_normal.logpdf
