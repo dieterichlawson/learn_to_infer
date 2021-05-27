@@ -259,7 +259,7 @@ def main(unused_argv):
   configs = [SimpleNamespace(**d) for d in hparams]
   normalize_configs(configs)
   metrics = defaultdict(dict)
-  for config in configs[0:4]:
+  for config in configs:
     model, params = load_model(config)
     key, k1 = jax.random.split(key)
     metrics[config.data_dim][config.min_k] = eval_model_in_batches(k1, model, params,
