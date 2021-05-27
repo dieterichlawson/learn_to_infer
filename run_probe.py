@@ -223,7 +223,7 @@ def make_summarize(
 
   def sample_and_pred(key, params, points_per_mode, min_k, max_k):
     xs, cs, ks, true_gmm_params = sample_eval_batch(key, points_per_mode, min_k, max_k)
-    kls, x_sos, xxt_sos, entropy, guess_ce, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
+    kls, x_sos, xxt_sos, entropy, guess_ce, _, _, _, _ = model.loss(params, xs, ks*points_per_mode, true_gmm_params, ks, key)
     # etnropy and guess_ce will be [num_layers]
     # kls is [num_layers, batch_Size, max_num_data_points]
     return kls, x_sos, xxt_sos, jnp.mean(entropy), jnp.mean(guess_ce)
@@ -285,9 +285,9 @@ def make_summarize(
     print("special points train")
     for i in range(num_print_pts):
       print("  point %d" % i)
-      s_kl =  "         kl: " % i
-      s_x =   "      x err: " % i
-      s_xxt = "    xxt err: " % i
+      s_kl =  "         kl: " 
+      s_x =   "      x err: "
+      s_xxt = "    xxt err: "
       for j in range(kls.shape[0]):
         s_kl += " %0.6f" % spec_train_kls[j,i]
         s_x += " %0.6f" % spec_train_x_sos[j,i]
@@ -299,9 +299,9 @@ def make_summarize(
     print("special points test")
     for i in range(num_print_pts):
       print("  point %d" % i)
-      s_kl =  "         kl: " % i
-      s_x =   "      x err: " % i
-      s_xxt = "    xxt err: " % i
+      s_kl =  "         kl: "
+      s_x =   "      x err: "
+      s_xxt = "    xxt err: "
       for j in range(kls.shape[0]):
         s_kl += " %0.6f" % spec_test_kls[j,i]
         s_x += " %0.6f" % spec_test_x_sos[j,i]

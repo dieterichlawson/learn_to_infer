@@ -144,7 +144,7 @@ def attach_probe(
   new_params_flat = flax.traverse_util.flatten_dict(new_init_params)
 
   for k, v in old_params_flat.items():
-    assert k in new_params_flat.keys()
+    assert k in new_params_flat.keys(), "Key %s not in %s" % (k, new_params_flat.keys())
     assert old_params_flat[k].shape == new_params_flat[k].shape
     new_params_flat[k] = v
   
@@ -172,14 +172,14 @@ def run_probe(
           k * data_points_per_mode, data_dim, mode_var, cov_dof, cov_prior, 
           dist_mult, noise_pct)
 
-  _, _, _, activations = model.loss(
+  _, _, _, _, _, activations, queries, keys, attn_weights, log_resps = model.loss(
       params, xs, ks*data_points_per_mode, true_gmm_params, ks, key)
 
   batch_em = vmap(em.em, in_axes=(0, None, None, 0, None, None))
   em_params, em_num_steps, em_resps, final_elbo,_ = batch_em(
       xs, k, max_em_steps, jax.random.split(key, num=batch_size), em_tol, em_reg)
   em_resps = em_resps[:,:jnp.max(em_num_steps)]
-  return cs, activations, em_resps, em_num_steps
+  return xs, cs, log_resps, activations, queries, keys, attn_weights, em_resps, em_num_steps
 
 
 def make_dirname(config):
@@ -242,7 +242,7 @@ def main(unused_argv):
       k=FLAGS.k,
       data_dim=FLAGS.data_dim,
       batch_size=FLAGS.batch_size)
-  cs, activations, em_resps, em_num_steps = run_probe(
+  xs, cs, log_resps, activations, queries, keys, attn_weights, em_resps, em_num_steps = run_probe(
     subkey,
     model,
     params,
@@ -260,7 +260,9 @@ def main(unused_argv):
     max_em_steps=FLAGS.max_em_steps)
 
   onp.savez('probe.npz', 
-      tfmr_acts=activations, true_cs=cs, em_resps=em_resps, em_num_steps=em_num_steps)
+      xs=xs, log_resps=log_resps, cs=cs, tfmr_acts=activations, tfmr_queries=queries, tfmr_keys=keys, 
+      tfmr_attn_weights=attn_weights, true_cs=cs, 
+      em_resps=em_resps, em_num_steps=em_num_steps)
 
 
 if __name__ == "__main__":
