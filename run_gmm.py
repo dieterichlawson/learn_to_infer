@@ -300,13 +300,14 @@ def make_logdir(config):
       "_%s"
       "_dist_%s"
       "_lr_%0.3f"
+      "_tied_%d"
       "_tpu%s" % (
         config.model_name,
         config.num_heads, config.num_encoders, config.num_decoders, 
         config.dist_multiplier, config.data_dim, config.min_k, config.max_k, 
         config.noise_pct or 0.,
         config.data_points_per_mode, config.cov_prior, 
-        config.cov_dof, config.normalization, config.dist, config.lr, config.tag)
+        config.cov_dof, config.normalization, config.dist, config.lr, int(config.tie_layer_weights), config.tag)
       )
   return os.path.join(basedir, exp_dir)
 
