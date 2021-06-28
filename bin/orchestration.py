@@ -79,7 +79,8 @@ def initialize_tpus(basename, num_tpus, dry_run, region="europe-west4-a"):
   os.system("seq 1 %d |"
             " parallel %s --jobs %d 'gcloud alpha compute tpus tpu-vm ssh l2i_%s_{} --zone %s"
             " -- \"git clone https://github.com/dieterichlawson/learn_to_infer.git"
-            " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
+            " && pip3 install -r learn_to_infer/requirements.txt" 
+            " && pip3 install \\\"jax[tpu]>=0.2.16\\\" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html\"'" % (
               num_tpus, dry_run_string, num_tpus, basename, region))
 
 def reinit_tpus(basename, tpu_nums, dry_run, region="europe-west4-a"):
@@ -93,7 +94,8 @@ def reinit_tpus(basename, tpu_nums, dry_run, region="europe-west4-a"):
       " pkill -f learn_to_infer\/run_gmm.py ;"
       " rm -r -f learn_to_infer"
       " && git clone https://github.com/dieterichlawson/learn_to_infer.git"
-      " && pip3 install -r learn_to_infer/requirements.txt\"'" % (
+      " && pip3 install -r learn_to_infer/requirements.txt" 
+      " && pip3 install \\\"jax[tpu]>=0.2.16\\\" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html\"'" % (
         tpu_num_string, dry_run_string, len(tpu_nums), basename, region))
 
 def stop_tpus(basename, tpu_nums, dry_run, region="europe-west4-a"):

@@ -1,7 +1,6 @@
 flax @ git+https://github.com/google/flax.git@e58dea2e55257648cee0b6485c09f3b6013b7d38
-jax==0.2.16
+jax>=0.2.16
 jaxlib>=0.1.68
-libtpu-nightly==0.1.dev20210615
 matplotlib>=3.3.2
 numpy>=1.18.5
 Pillow>=7.2.0
