@@ -1,12 +1,13 @@
 flax @ git+https://github.com/google/flax.git@e58dea2e55257648cee0b6485c09f3b6013b7d38
-jax==0.2.11
-jaxlib>=0.1.67
+jax==0.2.16
+jaxlib>=0.1.68
+libtpu-nightly==0.1.dev20210615
 matplotlib>=3.3.2
 numpy>=1.18.5
 Pillow>=7.2.0
 scikit-learn>=0.23.2
 scipy>=1.5.2
 sklearn>=0.0
-tensorflow_probability>=0.12.2
+tensorflow_probability>=0.13.0
 tensorflow>=2.3.1
 tabulate>=0.8.9
