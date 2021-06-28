@@ -60,6 +60,8 @@ flags.DEFINE_integer("max_k", 10,
                      "the maximum number of modes in the data.")
 flags.DEFINE_float("noise_pct", None,
                    "The percentage of the datasets that will be noise points.")
+flags.DEFINE_boolean("tie_layer_weights", False,
+                     "If true, all encoder layers will have equal weights.")
 flags.DEFINE_enum("dist", "l2", ["l2", "kl", "symm_kl"],
                   "The distance function used to measure similarity of components in the loss.")
 flags.DEFINE_integer("data_points_per_mode", 25,
@@ -136,11 +138,12 @@ def make_model(key,
                max_k=10,
                data_dim=2,
                normalization="no_norm",
+               tie_layer_weights=False,
                dist="l2"):
   model = class_dict[model_name](
       data_dim=data_dim, max_k=max_k, algo_k=max_k, num_heads=num_heads,
       num_encoders=num_encoders, num_decoders=num_decoders, qkv_dim=value_dim,
-      normalization=normalization, dist=dist)
+      normalization=normalization, dist=dist, tie_layer_weights=tie_layer_weights)
   params = model.init_params(key)
 
   return model, params
@@ -240,7 +243,10 @@ def make_summarize(
             key, params, points_per_mode, min_k, max_k)
     acc, f1, ll = gmm_eval.batch_metrics(
         xs, tfmr_gmm_params, cs, tfmr_cs, ks*points_per_mode, ks)
-    return acc, f1, ll
+    avg_acc = jnp.mean(acc)
+    avg_f1 = jnp.mean(f1)
+    avg_ll = jnp.mean(ll)
+    return avg_acc, avg_f1, avg_ll
 
   compute_metrics = jax.jit(compute_metrics, static_argnums=(2, 3, 4))
 
@@ -338,6 +344,7 @@ def main(unused_argv):
       max_k=FLAGS.max_k,
       data_dim=FLAGS.data_dim, 
       normalization=FLAGS.normalization,
+      tie_layer_weights=FLAGS.tie_layer_weights,
       dist=FLAGS.dist)
   loss_fn = make_loss(
       model,

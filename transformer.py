@@ -96,6 +96,43 @@ class TransformerEncoderLayer(nn.Module):
     return normalize(outs, normalization)
 
 
+class RepeatedTransformerEncoderStack(nn.Module):
+
+  def apply(self,
+            inputs,
+            mask,
+            num_encoders=6,
+            num_heads=8,
+            value_dim=128,
+            activation_fn=flax.nn.relu,
+            normalization=None,
+            weight_init=jax.nn.initializers.xavier_normal()):
+    """Applies a stack of transformer encoder layers.
+
+    Args:
+      inputs: The inputs to the transformer, a
+        [batch_size, max_num_data_points, data_dim] tensor.
+      mask: The mask for the inputs indicating which elements are padding. A
+        tensor of shape [batch_size, max_num_data_points].
+      num_encoders: The number of encoder layers in the stack.
+      num_heads: The number of heads to use for self-attention, defaults to 8.
+      value_dim: The dimension of the transformer's keys, values, and queries.
+      activation_fn: The activation function to use, defaults to relu.
+      weight_init: An initializer for the encoder weights.
+    Returns:
+      outs: A [batch_size, max_num_data_points, value_dim] tensor of outputs.
+    """
+    inputs = flax.nn.Dense(inputs, features=value_dim, kernel_init=weight_init)
+    encoder = TransformerEncoderLayer.shared(
+        activation_fn=activation_fn,
+        num_heads=num_heads,
+        normalization=normalization,
+        weight_init=weight_init)
+    for _ in range(num_encoders):
+      inputs = encoder(inputs, mask)
+    return inputs
+
+
 class TransformerEncoderStack(nn.Module):
 
   def apply(self,
@@ -255,7 +292,8 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
             qkv_dim=512,
             activation_fn=flax.nn.relu,
             normalization=None,
-            weight_init=jax.nn.initializers.xavier_uniform()):
+            weight_init=jax.nn.initializers.xavier_uniform(),
+            tie_layer_weights=False):
     """Applies Transformer model on the inputs.
 
     Args:
@@ -280,14 +318,26 @@ class UnconditionalEncoderDecoderTransformer(nn.Module):
     batch_size = inputs.shape[0]
     max_input_length = inputs.shape[1]
     input_mask = util.make_mask(input_lengths, max_input_length)
+    
+    if tie_layer_weights:
+      encoder_hs = RepeatedTransformerEncoderStack(
+          inputs,
+          input_mask,
+          num_encoders=num_encoders,
+          num_heads=num_heads,
+          value_dim=qkv_dim,
+          normalization=normalization,
+          weight_init=weight_init)
+    else:
+      encoder_hs = TransformerEncoderStack(
+          inputs,
+          input_mask,
+          num_encoders=num_encoders,
+          num_heads=num_heads,
+          value_dim=qkv_dim,
+          normalization=normalization,
+          weight_init=weight_init)
 
-    encoder_hs = TransformerEncoderStack(inputs,
-                                         input_mask,
-                                         num_encoders=num_encoders,
-                                         num_heads=num_heads,
-                                         value_dim=qkv_dim,
-                                         normalization=normalization,
-                                         weight_init=weight_init)
     # average over data dimension, resulting in [batch_size, data_dim]
     encoder_out = jnp.mean(encoder_hs, axis=1)
 

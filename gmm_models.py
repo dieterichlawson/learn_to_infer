@@ -576,6 +576,7 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
                normalization="no_norm",
                dist="l2",
                weight_init=jax.nn.initializers.xavier_uniform(),
+               tie_layer_weights=False,
                entropy_alpha=0.01):
     """Creates the model.
 
@@ -598,7 +599,8 @@ class MSWUnconditional(MeanScaleWeightInferenceMachine):
         target_dim=target_dim, max_target_length=max_k,
         num_heads=num_heads, num_encoders=num_encoders,
         num_decoders=num_decoders, qkv_dim=qkv_dim,
-        activation_fn=activation_fn, normalization=normalization, weight_init=weight_init)
+        activation_fn=activation_fn, normalization=normalization, weight_init=weight_init,
+        tie_layer_weights=tie_layer_weights)
     super().__init__(
         model, data_dim=data_dim, max_k=max_k, 
         dist=dist, entropy_alpha=entropy_alpha)
